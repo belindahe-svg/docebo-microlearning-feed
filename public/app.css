@@ -103,3 +103,6 @@ button{font:inherit;color:inherit;cursor:pointer}
 .searchrow{display:flex;gap:8px;align-items:center;padding:10px 12px 0}
 .searchrow input{flex:1;min-width:0;border:0;border-radius:999px;padding:9px 14px;font:inherit;font-size:14px;background:rgba(255,255,255,.95);color:#1d1a26}
 .searchrow button{border:0;background:none;font-size:14px;font-weight:500;padding:6px 2px}
+.ytout{position:absolute;left:50%;transform:translateX(-50%);top:calc(42% + 28vw);z-index:3;font-size:12px;color:#fff;
+  background:rgba(0,0,0,.55);border-radius:999px;padding:6px 12px;text-decoration:none;white-space:nowrap}
+@media (min-width:440px){.ytout{top:calc(42% + 128px)}}

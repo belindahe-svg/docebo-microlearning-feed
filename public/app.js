@@ -131,7 +131,29 @@
   }
 
   // ---------- video ----------
+  // HLS (.m3u8) plays natively in Safari; elsewhere load hls.js on first use.
+  let hlsLib = null;
+  function loadHls() {
+    hlsLib ??= new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js';
+      sc.onload = () => res(window.Hls);
+      sc.onerror = rej;
+      document.head.appendChild(sc);
+    });
+    return hlsLib;
+  }
+
   function wireVideo(v, card, it) {
+    if (/\.m3u8(\?|$)/i.test(it.videoUrl) && !v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.removeAttribute('src');
+      loadHls().then((Hls) => {
+        if (!Hls?.isSupported()) throw new Error('no hls');
+        const h = new Hls();
+        h.loadSource(it.videoUrl);
+        h.attachMedia(v);
+      }).catch(() => toast(`This video can't play here. Use "Open in Docebo" instead.`));
+    }
     const bar = card.querySelector('.bar i');
     const sent = new Set();
     v.addEventListener('timeupdate', () => {
@@ -170,6 +192,20 @@
   }
   function enrich(i) { enrichItem(items[i]); }
 
+  // Swap a rendered card for a fresh one (e.g. once we learn it is a playable video).
+  function replaceCard(i) {
+    const old = cards[i];
+    const tmp = document.createElement('div');
+    tmp.innerHTML = cardHtml(items[i], i);
+    const card = tmp.firstElementChild;
+    old.replaceWith(card);
+    cards[i] = card;
+    const v = card.querySelector('video');
+    if (v) wireVideo(v, card, items[i]);
+    if (io) { io.unobserve?.(old); io.observe(card); }
+    if (i === cur && v) { v.muted = muted; v.play().then(() => card.classList.remove('paused')).catch(() => card.classList.add('paused')); }
+  }
+
   // The Videos filter needs every asset's type, so look them all up (a few at a time).
   async function enrichAllAssets() {
     const todo = all.filter((it) => it.kind === 'asset' && !mediaReq.has(it.key));
@@ -181,7 +217,13 @@
     if (m.subtype) it.subtype = m.subtype;
     if (m.thumbnailUrl && !it.thumbnailUrl) it.thumbnailUrl = m.thumbnailUrl;
     if (m.youtubeId && !it.videoUrl) it.youtubeId = m.youtubeId;
-    const card = cards[items.indexOf(it)];
+    const idx = items.indexOf(it);
+    if (m.videoUrl && !it.videoUrl) {
+      it.videoUrl = m.videoUrl;
+      if (idx >= 0 && cards[idx]) replaceCard(idx);
+      return;
+    }
+    const card = cards[idx];
     if (!card) return;
     const chip = card.querySelector('.chips .chip');
     if (chip) chip.textContent = kindLabel(it);
@@ -199,8 +241,10 @@
   // this frame alone sends the origin (no path or query), after the auth code has left the address bar.
   function startYouTube(card, it) {
     if (card.querySelector('iframe.ytframe')) return;
-    const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(it.youtubeId)}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
-    card.insertAdjacentHTML('beforeend', `<iframe class="ytframe" src="${src}" title="${esc(it.title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`);
+    // Standard youtube.com player (not nocookie): a signed-in YouTube session can then clear YouTube's bot check.
+    const src = `https://www.youtube.com/embed/${encodeURIComponent(it.youtubeId)}?autoplay=1&playsinline=1&rel=0&modestbranding=1&origin=${encodeURIComponent(location.origin)}`;
+    card.insertAdjacentHTML('beforeend', `<iframe class="ytframe" src="${src}" title="${esc(it.title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+      <a class="ytout" href="https://www.youtube.com/watch?v=${encodeURIComponent(it.youtubeId)}" target="_blank" rel="noopener">Not playing? Watch on YouTube</a>`);
     card.classList.remove('paused');
     card.classList.add('playing');
     // Feed analytics only: "started" in this app. Docebo's own view record needs "Open in Docebo".
@@ -211,6 +255,7 @@
     const f = card?.querySelector('iframe.ytframe');
     if (!f) return;
     f.remove();
+    card.querySelector('.ytout')?.remove();
     card.classList.remove('playing');
     card.classList.add('paused');
   }

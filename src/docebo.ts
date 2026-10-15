@@ -197,6 +197,7 @@ export async function recordAssetView(env: Env, token: string | null, assetId: s
 /** What the feed needs from an asset's detail record to play or preview it. */
 export interface AssetMedia {
   youtubeId?: string;
+  videoUrl?: string;      // direct file or HLS stream for uploaded videos
   thumbnailUrl?: string;
   subtype?: string;
 }
@@ -235,14 +236,24 @@ export function assetMediaFrom(body: unknown): AssetMedia {
     (youtubeId ? `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg` : undefined);
   const playerType = String(p.player_type ?? '').toLowerCase();
   const config = (p.config ?? {}) as Json;
-  const subtype = youtubeId || /vimeo|wistia|\.mp4|\.m3u8/i.test(urls.join(' '))
+  // Uploaded videos: a Docebo-hosted http(s) source on a non-link player, recognised by the file
+  // extension of the source or of the original upload name, or by a video/media player type.
+  const VIDEO_EXT = /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i;
+  const isLink = playerType.includes('link');
+  const nameLooksVideo = VIDEO_EXT.test(String(c.name_original ?? '')) || VIDEO_EXT.test(String(c.name_converted ?? ''));
+  const direct = !youtubeId && !isLink
+    ? [...sources.map((s) => str(s?.url ?? s?.src ?? s?.file)), str(c.name_converted)]
+        .filter((u): u is string => !!u && /^https?:\/\//i.test(u) && !/youtu\.?be|vimeo\.com|wistia/i.test(u))
+        .find((u) => VIDEO_EXT.test(u) || nameLooksVideo || /video|media/.test(playerType))
+    : undefined;
+  const subtype = youtubeId || direct || /vimeo|wistia|\.mp4|\.m3u8/i.test(urls.join(' '))
     ? 'Video'
     : playerType.includes('link')
       ? 'Link'
       : config.total_pages
         ? 'Document'
         : undefined;
-  return { youtubeId, thumbnailUrl, subtype };
+  return { youtubeId, videoUrl: direct, thumbnailUrl, subtype };
 }
 
 // Per-isolate cache: asset media rarely changes, and this keeps repeat scrolls off the Docebo API.

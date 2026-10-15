@@ -94,3 +94,16 @@ describe('asset media', () => {
     expect(link.youtubeId).toBeUndefined();
   });
 });
+
+describe('uploaded video assets', () => {
+  it('returns a direct video URL from a Docebo-hosted source', () => {
+    const m = assetMediaFrom({ data: { player: { player_type: 'video', content: {
+      name_original: 'personality.mp4', sources: [{ url: 'https://media.docebosaas.com/abc/stream?sig=1' }] } } } });
+    expect(m.videoUrl).toBe('https://media.docebosaas.com/abc/stream?sig=1');
+    expect(m.subtype).toBe('Video');
+  });
+  it('never treats links or YouTube as direct video', () => {
+    expect(assetMediaFrom({ data: { player: { player_type: 'link_player', content: { sources: [{ url: 'https://x.com/a.mp4' }] } } } }).videoUrl).toBeUndefined();
+    expect(assetMediaFrom({ data: { player: { player_type: 'embeded', content: { sources: [{ url: 'https://youtu.be/dQw4w9WgXcQ' }] } } } }).videoUrl).toBeUndefined();
+  });
+});
