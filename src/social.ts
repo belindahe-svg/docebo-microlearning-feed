@@ -8,13 +8,16 @@ import type { Env, Session } from './types';
  *                    DELETE /share/v1/comments/{id}
  *   Asset rating     GET/PUT /share/v1/assets/{id}/rating {rating} -> {rating, can_rate}
  *   Course rating    POST /learn/v1/courses/{id}/rating {rating}
- *   Playlists        GET /share/v1/playlists?type_content=asset|my-course,
+ *   Playlists        GET /share/v1/playlists?type_content=asset|my-course[&id_content=],
  *                    POST /share/v1/playlists {id_content, channels, title, is_private, type_content},
  *                    PUT/DELETE /share/v1/playlists/{id}/item {id_asset | id_course}
  *   Invite to watch  GET /share/v1/assets/{id}/invitations/suggestions?invite_watch=true,
  *                    GET /share/v1/assets/{id}/invitations/users?search= (3+ chars),
  *                    POST /share/v1/assets/{id}/invitations {user_ids, invite_watch}
  *   View tracking    PUT /share/v1/assets/{id}/track
+ *   Contribute       POST /share/v1/link | /share/v1/videolink {url, title, description, channels},
+ *                    GET /share/v1/link/meta?url=, uploads: GET /manage/v1/upload/presigned_url
+ *                    (collection app7020) then POST /share/v1/assets + PUT /share/v1/assets/{id}/channels
  */
 
 type Json = Record<string, unknown>;
@@ -144,73 +147,9 @@ export async function rateItem(env: Env, s: Session, kind: string, id: string, r
   throw new DoceboError(400, 'Learning plans cannot be rated in Docebo');
 }
 
-// ---------- save -> Docebo playlist ----------
-
-export const PLAYLIST_TITLE = 'Saved from Feed';
-
-/** Find (or remember) the learner's private "Saved from Feed" playlist. Returns undefined if none yet. */
-async function findPlaylist(env: Env, s: Session & { access_token: string }): Promise<number | undefined> {
-  const cached = await env.DB.prepare('SELECT playlist_id FROM user_playlists WHERE user_id = ?').bind(s.user_id).first<{ playlist_id: number }>();
-  if (cached) return cached.playlist_id;
-  for (const type of ['asset', 'my-course']) {
-    const j = await doceboCall(env, s.access_token, 'GET',
-      `/share/v1/playlists?type_content=${type}&search_text=${encodeURIComponent(PLAYLIST_TITLE)}&page_size=50`).catch(() => ({} as Json));
-    const hit = itemsOf(j).find((p) => String(p.title ?? p.name ?? '') === PLAYLIST_TITLE);
-    if (hit?.id) {
-      await rememberPlaylist(env, s.user_id, Number(hit.id));
-      return Number(hit.id);
-    }
-  }
-  return undefined;
-}
-
-async function rememberPlaylist(env: Env, userId: string, id: number) {
-  await env.DB.prepare(
-    'INSERT INTO user_playlists (user_id, playlist_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET playlist_id = excluded.playlist_id',
-  ).bind(userId, id, Math.floor(Date.now() / 1000)).run();
-}
+// ---------- playlists ----------
 
 const itemBody = (kind: string, id: string) => (kind === 'asset' ? { id_asset: Number(id) } : { id_course: Number(id) });
-
-/**
- * Mirror a save into Docebo. Assets and courses only (Docebo playlists hold nothing else).
- * Returns 'synced', 'skipped' (kind not supported / mock mode) or throws DoceboError.
- */
-export async function syncSaveToPlaylist(env: Env, s: Session, kind: string, id: string, on: boolean): Promise<'synced' | 'skipped'> {
-  if (!live(env, s) || (kind !== 'asset' && kind !== 'course')) return 'skipped';
-  let pl = await findPlaylist(env, s);
-  if (!on) {
-    if (!pl) return 'synced';
-    await doceboCall(env, s.access_token, 'DELETE', `/share/v1/playlists/${pl}/item`, itemBody(kind, id)).catch((e) => {
-      // Removing something that is not in the playlist is fine; a deleted playlist is forgotten.
-      if (e instanceof DoceboError && e.status === 404) return env.DB.prepare('DELETE FROM user_playlists WHERE user_id = ?').bind(s.user_id).run();
-      throw e;
-    });
-    return 'synced';
-  }
-  if (pl) {
-    try {
-      await doceboCall(env, s.access_token, 'PUT', `/share/v1/playlists/${pl}/item`, itemBody(kind, id));
-      return 'synced';
-    } catch (e) {
-      if (!(e instanceof DoceboError && e.status === 404)) throw e;
-      await env.DB.prepare('DELETE FROM user_playlists WHERE user_id = ?').bind(s.user_id).run();
-      pl = undefined; // playlist was deleted in Docebo: recreate below
-    }
-  }
-  // Docebo creates a playlist together with its first item.
-  const j = await doceboCall(env, s.access_token, 'POST', '/share/v1/playlists', {
-    id_content: Number(id),
-    type_content: kind === 'asset' ? 'asset' : 'my-course',
-    channels: [],
-    title: PLAYLIST_TITLE,
-    description: 'Items saved from the micro-learning feed',
-    is_private: 1,
-  });
-  const newId = Number(dataOf(j).id);
-  if (Number.isFinite(newId) && newId > 0) await rememberPlaylist(env, s.user_id, newId);
-  return 'synced';
-}
 
 // ---------- invite to watch (assets) ----------
 
@@ -260,4 +199,170 @@ export async function trackAssetView(env: Env, token: string | null, assetId: st
   } catch {
     return false;
   }
+}
+
+// ---------- Save -> Docebo "Add to playlist" (learner chooses the playlist) ----------
+
+export interface PlaylistOption {
+  id: number;
+  title: string;
+  private: boolean;
+  contains: boolean; // this item is already in the playlist
+}
+
+const playlistType = (kind: string) => (kind === 'asset' ? 'asset' : 'my-course');
+
+function mapPlaylist(p: Json): { id: number; title: string; private: boolean } {
+  return {
+    id: Number(p.id ?? p.id_playlist),
+    title: String(p.title ?? p.name ?? `Playlist ${p.id}`),
+    private: Number(p.is_private ?? 0) === 1 || p.is_private === true,
+  };
+}
+
+/** The learner's playlists, flagged with whether this item is already in each. */
+export async function listPlaylistsFor(env: Env, s: Session, kind: string, id: string): Promise<PlaylistOption[]> {
+  if (!live(env, s)) return [];
+  const type = playlistType(kind);
+  const [all, containing] = await Promise.all([
+    doceboCall(env, s.access_token, 'GET', `/share/v1/playlists?type_content=${type}&page_size=200&sort_attr=title&sort_dir=asc`),
+    doceboCall(env, s.access_token, 'GET', `/share/v1/playlists?type_content=${type}&id_content=${encodeURIComponent(id)}&page_size=200`),
+  ]);
+  const inIds = new Set(itemsOf(containing).map((p) => Number(p.id ?? p.id_playlist)));
+  return itemsOf(all)
+    .map(mapPlaylist)
+    .filter((p) => Number.isFinite(p.id) && p.id > 0)
+    .map((p) => ({ ...p, contains: inIds.has(p.id) }));
+}
+
+export async function setPlaylistItem(env: Env, s: Session, kind: string, id: string, playlistId: number, on: boolean): Promise<void> {
+  if (!live(env, s)) throw new DoceboError(400, 'Playlists need live mode');
+  await doceboCall(env, s.access_token, on ? 'PUT' : 'DELETE', `/share/v1/playlists/${playlistId}/item`, itemBody(kind, id));
+}
+
+/** Docebo creates a playlist together with its first item. */
+export async function createPlaylistWith(env: Env, s: Session, kind: string, id: string, title: string, isPrivate: boolean): Promise<number> {
+  if (!live(env, s)) throw new DoceboError(400, 'Playlists need live mode');
+  const j = await doceboCall(env, s.access_token, 'POST', '/share/v1/playlists', {
+    id_content: Number(id),
+    type_content: playlistType(kind),
+    channels: [],
+    title,
+    is_private: isPrivate ? 1 : 0,
+  });
+  return Number(dataOf(j).id);
+}
+
+// ---------- Contribute (Docebo "Share content") ----------
+
+export interface ChannelOption {
+  id: number;
+  name: string;
+}
+
+/** Custom channels the learner can see. Docebo enforces upload permission when the asset is assigned. */
+export async function contributableChannels(env: Env, s: Session): Promise<ChannelOption[]> {
+  if (!live(env, s)) return [];
+  const j = await doceboCall(env, s.access_token, 'GET', '/learn/v1/channels?page_size=100');
+  return itemsOf(j)
+    .filter((c) => !c.predefined_uid)
+    .map((c) => ({ id: Number(c.id), name: String(c.name ?? `Channel ${c.id}`) }))
+    .filter((c) => Number.isFinite(c.id) && c.id > 0);
+}
+
+export async function linkMeta(env: Env, s: Session, url: string): Promise<{ title?: string; description?: string; image?: string }> {
+  if (!live(env, s)) return {};
+  const d = dataOf(await doceboCall(env, s.access_token, 'GET', `/share/v1/link/meta?url=${encodeURIComponent(url)}`));
+  const img = typeof d.image === 'string' && d.image ? (d.image.startsWith('//') ? `https:${d.image}` : d.image) : undefined;
+  return { title: d.title ? String(d.title) : undefined, description: d.description ? String(d.description) : undefined, image: img };
+}
+
+const VIDEO_HOSTS = /(^|\.)(youtube\.com|youtu\.be|vimeo\.com|wistia\.(com|net))$/i;
+
+/** Publish a link: YouTube/Vimeo/Wistia become video links (playable in Docebo), anything else a web link. */
+export async function contributeLink(env: Env, s: Session, a: { url: string; title: string; description: string; thumbnail?: string; channels: number[] }): Promise<number | undefined> {
+  if (!live(env, s)) throw new DoceboError(400, 'Contributing needs live mode');
+  const host = new URL(a.url).hostname;
+  const path = VIDEO_HOSTS.test(host) ? '/share/v1/videolink' : '/share/v1/link';
+  const j = await doceboCall(env, s.access_token, 'POST', path, {
+    url: a.url,
+    title: a.title,
+    description: a.description,
+    ...(a.thumbnail ? { thumbnail_url: a.thumbnail } : {}),
+    channels: a.channels,
+  });
+  const item = (dataOf(j).item ?? {}) as Json;
+  const id = Number(item.id ?? item.id_asset);
+  return Number.isFinite(id) ? id : undefined;
+}
+
+/** Docebo asset content types (POST /share/v1/assets). */
+export function contentTypeFor(mime: string, filename: string): number {
+  const m = mime.toLowerCase();
+  const ext = filename.toLowerCase().split('.').pop() ?? '';
+  if (m.startsWith('video/')) return 1;
+  if (m.startsWith('image/')) return 7;
+  if (m.startsWith('audio/')) return 12;
+  if (m === 'application/pdf' || ext === 'pdf') return 5;
+  if (/presentation|powerpoint/.test(m) || ['ppt', 'pptx', 'key', 'odp'].includes(ext)) return 4;
+  if (/spreadsheet|excel/.test(m) || ['xls', 'xlsx', 'csv', 'ods'].includes(ext)) return 3;
+  if (/word|opendocument\.text|rtf/.test(m) || ['doc', 'docx', 'odt', 'rtf'].includes(ext)) return 2;
+  if (m === 'text/plain' || ext === 'txt') return 6;
+  if (/zip|compressed|x-7z|x-rar|tar/.test(m)) return 13;
+  return 10;
+}
+
+/**
+ * Store an uploaded file in Docebo's asset storage. Docebo hands out a presigned S3 URL
+ * (GET /manage/v1/upload/presigned_url, collection "app7020", the Coach & Share store)
+ * and the Worker streams the browser's upload to it, avoiding S3 CORS on a foreign origin.
+ */
+export async function uploadToDocebo(env: Env, s: Session, filename: string, mime: string, body: ReadableStream | null, length: string | null): Promise<string> {
+  if (!live(env, s)) throw new DoceboError(400, 'Uploading needs live mode');
+  if (!body) throw new DoceboError(400, 'No file received');
+  const q = new URLSearchParams({ filename, mime, collection: 'app7020' });
+  const d = dataOf(await doceboCall(env, s.access_token, 'GET', `/manage/v1/upload/presigned_url?${q}`));
+  const url = String(d.url ?? '');
+  const stored = String(d.fileName ?? d.filename_hashed ?? '');
+  if (!url || !stored) throw new DoceboError(502, 'Docebo did not return an upload URL');
+  const res = await fetch(url.startsWith('//') ? `https:${url}` : url, {
+    method: 'PUT',
+    headers: { 'Content-Type': String(d.content_type ?? mime), ...(length ? { 'Content-Length': length } : {}) },
+    body,
+  });
+  if (!res.ok) {
+    const text = (await res.text().catch(() => '')).replace(/\s+/g, ' ');
+    const code = /<Code>([^<]+)<\/Code>/.exec(text)?.[1];
+    throw new DoceboError(502, `Upload to Docebo storage failed (${res.status}${code ? ` ${code}` : ''})`);
+  }
+  return stored;
+}
+
+/** Create the asset for an uploaded file, then place it in the chosen channels. */
+export async function contributeFile(env: Env, s: Session, a: { storedName: string; originalName: string; mime: string; title: string; description: string; channels: number[] }): Promise<{ id: number; channelErrors?: string }> {
+  if (!live(env, s)) throw new DoceboError(400, 'Contributing needs live mode');
+  const j = await doceboCall(env, s.access_token, 'POST', '/share/v1/assets', {
+    original_file_name: a.originalName,
+    file_name: a.storedName,
+    content_type: contentTypeFor(a.mime, a.originalName),
+    id_source: 1,
+    is_private: 0,
+    title: a.title,
+    description: a.description,
+    tags: [],
+    skill_codes: [],
+  });
+  const id = Number(dataOf(j).id);
+  if (!Number.isFinite(id) || id <= 0) throw new DoceboError(502, 'Docebo did not return the new asset');
+  let channelErrors: string | undefined;
+  if (a.channels.length) {
+    try {
+      const r = dataOf(await doceboCall(env, s.access_token, 'PUT', `/share/v1/assets/${id}/channels`, { channels: a.channels }));
+      const errs = r.errors;
+      if (errs && (Array.isArray(errs) ? errs.length : Object.keys(errs as Json).length)) channelErrors = JSON.stringify(errs).slice(0, 200);
+    } catch (e) {
+      channelErrors = (e as Error).message;
+    }
+  }
+  return { id, channelErrors };
 }

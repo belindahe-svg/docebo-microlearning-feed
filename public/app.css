@@ -137,3 +137,27 @@ button{font:inherit;color:inherit;cursor:pointer}
 .sheet{visibility:hidden;pointer-events:none;transition:transform .25s ease,visibility 0s linear .25s}
 .sheet.open{visibility:visible;pointer-events:auto;transition:transform .25s ease,visibility 0s}
 html,body{overflow:hidden}
+
+/* Playlist picker and Share content */
+.postbtn{flex:none;width:36px;height:36px;border-radius:50%;border:0;background:#fff;color:#1d1a26;display:grid;place-items:center;margin-left:10px}
+.sheet.tall{height:86%}
+.newpl{display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding-top:10px}
+.newpl input[type=text],#newPlName{flex:1;min-width:0;border:1px solid var(--line);border-radius:999px;padding:9px 14px;background:transparent;color:inherit;font:inherit;font-size:14px}
+.newpl .priv{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;white-space:nowrap}
+.newpl button{border:0;border-radius:999px;background:var(--brand);color:var(--sheet);font-weight:600;padding:9px 14px}
+.tabs{display:flex;gap:6px}
+.tab{flex:1;border:1px solid var(--line);background:transparent;border-radius:999px;padding:8px;font-weight:600;font-size:13px}
+.tab[aria-selected="true"]{background:var(--sheet-fg);color:var(--sheet);border-color:var(--sheet-fg)}
+.postform{display:flex;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;flex:1}
+.postform [data-pane][hidden]{display:none}
+.postform input:not([type=checkbox]):not([type=file]),.postform textarea{border:1px solid var(--line);border-radius:12px;padding:9px 12px;background:transparent;color:inherit;font:inherit;font-size:14px;width:100%;resize:vertical}
+.filepick{display:block;border:1.5px dashed var(--line);border-radius:12px;padding:16px;text-align:center;font-size:14px;color:var(--muted);cursor:pointer}
+.filepick input{position:absolute;opacity:0;width:1px;height:1px}
+.filepick:focus-within{outline:2px solid #b89bf0}
+.linkprev img{width:100%;max-height:140px;object-fit:cover;border-radius:12px}
+.lbl{font-size:12px;font-weight:600;margin:4px 0 0;color:var(--muted)}
+.chanlist{flex:none;max-height:150px;min-height:0}
+.progress{height:6px;border-radius:999px;background:var(--line);overflow:hidden}
+.progress i{display:block;height:100%;width:0;background:var(--brand);transition:width .2s}
+.progress[hidden]{display:none}
+.postform .hint{text-align:left;margin:0}

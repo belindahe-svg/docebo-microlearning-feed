@@ -327,12 +327,7 @@
     try {
       const r = await api(`/api/items/${encodeURIComponent(it.key)}/${kind}`, { method: 'POST', body: JSON.stringify({ on }) });
       if (kind === 'like') { e.liked = r.liked; e.likes = r.likes; btn.querySelector('span').textContent = e.likes; }
-      else {
-        e.saved = r.saved;
-        btn.querySelector('span').textContent = e.saved ? 'Saved' : 'Save';
-        if (r.docebo === 'synced') toast(e.saved ? 'Saved. Also added to your Docebo playlist "Saved from Feed".' : 'Removed from your Docebo playlist.');
-        else if (r.docebo === 'failed') toast(`Saved here, but Docebo's playlist didn't accept it: ${r.message}`);
-      }
+      else { e.saved = r.saved; btn.querySelector('span').textContent = e.saved ? 'Saved' : 'Save'; }
       btn.setAttribute('aria-pressed', String(kind === 'like' ? e.liked : e.saved));
     } catch (err) { toast(err.message); }
     btn.disabled = false;
@@ -480,6 +475,172 @@
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => closePanel($(b.dataset.close))));
   [$('rateSheet'), $('shareSheet')].forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePanel(el); }));
 
+  // ---------- Save = Docebo "Add to playlist" ----------
+  let plItem = null;
+  let playlists = [];
+  function renderPlaylists() {
+    $('plList').innerHTML = playlists.length
+      ? playlists.map((p) => `<li><label><input type="checkbox" value="${p.id}" ${p.contains ? 'checked' : ''}>
+          <span class="who">${esc(p.title)}</span>${p.private ? '<span class="when">Private</span>' : ''}</label></li>`).join('')
+      : '<li class="empty">No playlists yet. Create one below.</li>';
+  }
+  async function syncSaved() {
+    // The bookmark shows "Saved" when the item is in at least one Docebo playlist.
+    const any = playlists.some((p) => p.contains);
+    const e = plItem.engagement;
+    const btn = cards[items.indexOf(plItem)]?.querySelector('.save');
+    if (any !== e.saved) {
+      try { await api(`/api/items/${encodeURIComponent(plItem.key)}/save`, { method: 'POST', body: JSON.stringify({ on: any }) }); } catch { /* cosmetic */ }
+      e.saved = any;
+    }
+    if (btn) { btn.setAttribute('aria-pressed', String(any)); btn.querySelector('span').textContent = any ? 'Saved' : 'Save'; }
+  }
+  async function openPlaylists(i) {
+    plItem = items[i];
+    playlists = [];
+    $('plList').innerHTML = '<li class="empty">Loading your playlists</li>';
+    $('newPlName').value = '';
+    openPanel($('plSheet'));
+    try {
+      playlists = (await api(`/api/items/${encodeURIComponent(plItem.key)}/playlists`)).playlists;
+      renderPlaylists();
+      syncSaved();
+    } catch (err) { $('plList').innerHTML = `<li class="empty">${esc(err.message)}</li>`; }
+  }
+  $('plList').addEventListener('change', async (e) => {
+    const box = e.target;
+    const p = playlists.find((x) => x.id === Number(box.value));
+    if (!p) return;
+    box.disabled = true;
+    try {
+      await api(`/api/items/${encodeURIComponent(plItem.key)}/playlists`, { method: 'POST', body: JSON.stringify({ playlistId: p.id, on: box.checked }) });
+      p.contains = box.checked;
+      toast(box.checked ? `Added to "${p.title}".` : `Removed from "${p.title}".`);
+      syncSaved();
+    } catch (err) { box.checked = !box.checked; toast(err.message); }
+    box.disabled = false;
+  });
+  $('newPl').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const title = $('newPlName').value.trim();
+    if (!title || !plItem) return;
+    try {
+      const r = await api(`/api/items/${encodeURIComponent(plItem.key)}/playlists/new`, { method: 'POST', body: JSON.stringify({ title, private: $('newPlPrivate').checked }) });
+      playlists.unshift({ id: r.id, title, private: $('newPlPrivate').checked, contains: true });
+      $('newPlName').value = '';
+      renderPlaylists();
+      syncSaved();
+      toast(`Created "${title}" and added this item.`);
+    } catch (err) { toast(err.message); }
+  });
+
+  // ---------- + Share content (Docebo contribute) ----------
+  let postTab = 'upload';
+  let linkThumb = '';
+  let channelsLoaded = false;
+  function setTab(tab) {
+    postTab = tab;
+    document.querySelectorAll('#postSheet .tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+    document.querySelectorAll('#postForm [data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== tab; });
+  }
+  async function openPost() {
+    $('postForm').reset();
+    $('postFileLabel').textContent = 'Choose a video, image or document';
+    $('linkPrev').hidden = true;
+    linkThumb = '';
+    $('postProgress').hidden = true;
+    $('postSubmit').disabled = false;
+    setTab('upload');
+    openPanel($('postSheet'));
+    if (!channelsLoaded) {
+      try {
+        const { channels } = await api('/api/contribute/channels');
+        $('postChannels').innerHTML = channels.length
+          ? channels.map((c) => `<li><label><input type="checkbox" value="${c.id}"><span class="who">${esc(c.name)}</span></label></li>`).join('')
+          : '<li class="empty">No channels available. It will go to your own channel.</li>';
+        channelsLoaded = true;
+      } catch (err) { $('postChannels').innerHTML = `<li class="empty">${esc(err.message)}</li>`; }
+    } else {
+      $('postChannels').querySelectorAll('input').forEach((x) => { x.checked = false; });
+    }
+  }
+  $('postBtn').addEventListener('click', openPost);
+  document.querySelectorAll('#postSheet .tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  $('postFile').addEventListener('change', () => {
+    const f = $('postFile').files[0];
+    if (!f) return;
+    $('postFileLabel').textContent = `${f.name} (${(f.size / 1048576).toFixed(1)} MB)`;
+    if (!$('postTitle').value) $('postTitle').value = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+  });
+  let metaTimer;
+  $('postUrl').addEventListener('input', () => {
+    clearTimeout(metaTimer);
+    metaTimer = setTimeout(async () => {
+      const u = $('postUrl').value.trim();
+      if (!/^https:\/\/\S+\.\S+/.test(u)) return;
+      try {
+        const m = await api(`/api/contribute/meta?url=${encodeURIComponent(u)}`);
+        if (m.title && !$('postTitle').value) $('postTitle').value = m.title;
+        if (m.description && !$('postDesc').value) $('postDesc').value = m.description.slice(0, 2000);
+        linkThumb = m.image || '';
+        $('linkPrev').hidden = !linkThumb;
+        $('linkPrev').innerHTML = linkThumb ? `<img alt="" src="${esc(linkThumb)}">` : '';
+      } catch { /* preview is optional */ }
+    }, 500);
+  });
+
+  function uploadFile(f) {
+    // XHR (not fetch) so the learner sees upload progress.
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', `/api/contribute/upload?filename=${encodeURIComponent(f.name)}&mime=${encodeURIComponent(f.type || 'application/octet-stream')}`);
+      x.setRequestHeader('Authorization', `Bearer ${token}`);
+      x.upload.onprogress = (e) => { if (e.lengthComputable) $('postProgress').firstElementChild.style.width = `${Math.round((e.loaded / e.total) * 100)}%`; };
+      x.onload = () => {
+        let body = {};
+        try { body = JSON.parse(x.responseText); } catch { /* keep empty */ }
+        if (x.status >= 200 && x.status < 300 && body.storedName) resolve(body.storedName);
+        else reject(new Error(body.error || `Upload failed (${x.status})`));
+      };
+      x.onerror = () => reject(new Error('Upload failed. Check the connection and try again.'));
+      x.send(f);
+    });
+  }
+
+  $('postForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const title = $('postTitle').value.trim();
+    const description = $('postDesc').value.trim();
+    const channels = [...$('postChannels').querySelectorAll('input:checked')].map((x) => Number(x.value));
+    if (!title) return void toast('Add a title.');
+    $('postSubmit').disabled = true;
+    try {
+      if (postTab === 'link') {
+        const url = $('postUrl').value.trim();
+        if (!/^https:\/\//.test(url)) throw new Error('Enter a full https:// link.');
+        $('postSubmit').textContent = 'Publishing';
+        await api('/api/contribute', { method: 'POST', body: JSON.stringify({ type: 'link', url, title, description, thumbnail: linkThumb, channels }) });
+      } else {
+        const f = $('postFile').files[0];
+        if (!f) throw new Error('Choose a file to upload.');
+        if (f.size > 95 * 1048576) throw new Error('Files up to 95 MB can be shared from the feed. Use Docebo for larger files.');
+        $('postProgress').hidden = false;
+        $('postSubmit').textContent = 'Uploading';
+        const storedName = await uploadFile(f);
+        $('postSubmit').textContent = 'Publishing';
+        const r = await api('/api/contribute', { method: 'POST', body: JSON.stringify({ type: 'file', storedName, originalName: f.name, mime: f.type, title, description, channels }) });
+        if (r.channelErrors) toast(`Shared, but some channels refused it: ${r.channelErrors}`);
+      }
+      closePanel($('postSheet'));
+      toast(postTab === 'link'
+        ? 'Shared to Docebo. It appears in the channels once published (some channels need expert approval).'
+        : 'Uploaded to Docebo. Videos take a few minutes to process, and some channels need expert approval.');
+    } catch (err) { toast(err.message); }
+    $('postSubmit').disabled = false;
+    $('postSubmit').textContent = 'Publish';
+  });
+  [$('plSheet'), $('postSheet')].forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePanel(el); }));
+
   // ---------- events ----------
   feedEl.addEventListener('click', (e) => {
     const card = e.target.closest('.card');
@@ -489,7 +650,7 @@
     const like = e.target.closest('.like');
     const save = e.target.closest('.save');
     if (like) return void toggleFlag(like, it, 'like');
-    if (save) return void toggleFlag(save, it, 'save');
+    if (save) return void (it.kind === 'asset' || it.kind === 'course' ? openPlaylists(i) : toggleFlag(save, it, 'save'));
     if (e.target.closest('.com')) return void openSheet(i);
     if (e.target.closest('.rate')) return void openRate(i);
     if (e.target.closest('.share')) return void openShare(i);

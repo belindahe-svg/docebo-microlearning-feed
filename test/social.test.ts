@@ -11,3 +11,16 @@ describe('Docebo comment mapping (confirmed /share/v1/comments item shape)', () 
     expect(mapDoceboComment(raw, '99').mine).toBe(false);
   });
 });
+
+import { contentTypeFor } from '../src/social';
+describe('Docebo content types for uploads', () => {
+  it('maps common files to Docebo asset types', () => {
+    expect(contentTypeFor('video/mp4', 'a.mp4')).toBe(1);
+    expect(contentTypeFor('image/png', 'a.png')).toBe(7);
+    expect(contentTypeFor('application/pdf', 'a.pdf')).toBe(5);
+    expect(contentTypeFor('', 'deck.pptx')).toBe(4);
+    expect(contentTypeFor('', 'sheet.xlsx')).toBe(3);
+    expect(contentTypeFor('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'a.docx')).toBe(2);
+    expect(contentTypeFor('application/octet-stream', 'a.bin')).toBe(10);
+  });
+});

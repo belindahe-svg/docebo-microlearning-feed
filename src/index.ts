@@ -11,8 +11,15 @@ import {
   listAssetComments,
   rateItem,
   sendInvites,
-  syncSaveToPlaylist,
+  contributableChannels,
+  contributeFile,
+  contributeLink,
+  createPlaylistWith,
+  linkMeta,
+  listPlaylistsFor,
+  setPlaylistItem,
   trackAssetView,
+  uploadToDocebo,
 } from './social';
 import { isDiscoveryUser, runDiscovery } from './discover';
 import {
@@ -36,6 +43,16 @@ function json(data: unknown, status = 200): Response {
   });
 }
 const err = (status: number, message: string) => json({ error: message }, status);
+
+/** Accept only absolute https links (contributed links, thumbnails). */
+function safeUrl(v: unknown): string | null {
+  try {
+    const u = new URL(String(v ?? '').trim());
+    return u.protocol === 'https:' ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Pass Docebo's own refusal (e.g. permissions, comments disabled) through to the learner. */
 function doceboErr(e: unknown): Response {
@@ -176,6 +193,47 @@ async function route(req: Request, env: Env): Promise<Response> {
     }
   }
 
+  // ---------- Contribute (Docebo "Share content") ----------
+  if (path.startsWith('/api/contribute')) {
+    try {
+      if (path === '/api/contribute/channels' && req.method === 'GET') return json({ channels: await contributableChannels(env, s) });
+      if (path === '/api/contribute/meta' && req.method === 'GET') {
+        const u = safeUrl(url.searchParams.get('url'));
+        if (!u) return err(400, 'Enter a full https:// link');
+        return json(await linkMeta(env, s, u));
+      }
+      if (path === '/api/contribute/upload' && req.method === 'POST') {
+        const filename = (url.searchParams.get('filename') ?? '').replace(/[^\w.\- ]+/g, '_').slice(-120);
+        const mime = (url.searchParams.get('mime') ?? 'application/octet-stream').slice(0, 100);
+        if (!filename) return err(400, 'Missing file name');
+        const len = Number(req.headers.get('Content-Length') ?? 0);
+        if (len > 95 * 1024 * 1024) return err(413, 'Files up to 95 MB can be shared from the feed. Use Docebo for larger files.');
+        return json({ storedName: await uploadToDocebo(env, s, filename, mime, req.body, req.headers.get('Content-Length')) });
+      }
+      if (path === '/api/contribute' && req.method === 'POST') {
+        const b = await readJson<{ type?: string; url?: string; storedName?: string; originalName?: string; mime?: string; title?: string; description?: string; thumbnail?: string; channels?: unknown[] }>(req);
+        const title = (b?.title ?? '').trim().slice(0, 200);
+        const description = (b?.description ?? '').trim().slice(0, 2000);
+        const channels = [...new Set((b?.channels ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 20);
+        if (!title) return err(400, 'Add a title');
+        if (b?.type === 'link') {
+          const u = safeUrl(b.url);
+          if (!u) return err(400, 'Enter a full https:// link');
+          const id = await contributeLink(env, s, { url: u, title, description, thumbnail: safeUrl(b.thumbnail) ?? undefined, channels });
+          return json({ id }, 201);
+        }
+        if (b?.type === 'file') {
+          if (!b.storedName || !/^[\w.-]+$/.test(b.storedName)) return err(400, 'Upload the file first');
+          return json(await contributeFile(env, s, { storedName: b.storedName, originalName: (b.originalName ?? b.storedName).slice(0, 200), mime: b.mime ?? '', title, description, channels }), 201);
+        }
+        return err(400, 'Unknown contribution type');
+      }
+    } catch (e) {
+      return doceboErr(e);
+    }
+    return err(404, 'Not found');
+  }
+
   const delComment = /^\/api\/comments\/(d?)(\d+)$/.exec(path);
   if (delComment && req.method === 'DELETE') {
     if (delComment[1] === 'd') {
@@ -189,7 +247,7 @@ async function route(req: Request, env: Env): Promise<Response> {
     return (await deleteOwnComment(env, Number(delComment[2]), s.user_id)) ? json({ ok: true }) : err(404, 'Comment not found');
   }
 
-  const m = /^\/api\/items\/([^/]+)\/(like|save|comments|progress|rating|invite)$/.exec(path);
+  const m = /^\/api\/items\/([^/]+)\/(like|save|comments|progress|rating|invite|playlists|playlists\/new)$/.exec(path);
   if (!m) return err(404, 'Not found');
   const key = decodeURIComponent(m[1]);
   if (!ITEM_KEY_RE.test(key)) return err(400, 'Invalid item key');
@@ -204,16 +262,35 @@ async function route(req: Request, env: Env): Promise<Response> {
     return json({ liked: on, likes: await likeCount(env, key) });
   }
 
-  // Save: kept in the app (drives the Saved filter) and mirrored to the learner's Docebo playlist.
+  // Saved flag in the app (drives the Saved filter). For assets and courses the feed sets it from
+  // Docebo playlist membership; learning plans (not playlist-able in Docebo) toggle it directly.
   if (action === 'save' && req.method === 'POST') {
     const b = await readJson<{ on?: boolean }>(req);
     const on = b?.on !== false;
     await setFlag(env, 'saves', key, s.user_id, on);
+    return json({ saved: on });
+  }
+
+  // Docebo "Add to playlist": the learner's playlists, toggle membership, or create a new one.
+  if (action === 'playlists' || action === 'playlists/new') {
+    if (kind !== 'asset' && kind !== 'course') return err(400, 'Docebo playlists hold assets and courses only');
     try {
-      const docebo = await syncSaveToPlaylist(env, s, kind, itemId, on);
-      return json({ saved: on, docebo });
+      if (action === 'playlists' && req.method === 'GET') return json({ playlists: await listPlaylistsFor(env, s, kind, itemId) });
+      if (action === 'playlists' && req.method === 'POST') {
+        const b = await readJson<{ playlistId?: number; on?: boolean }>(req);
+        const pid = Number(b?.playlistId);
+        if (!Number.isInteger(pid) || pid <= 0) return err(400, 'Pick a playlist');
+        await setPlaylistItem(env, s, kind, itemId, pid, b?.on !== false);
+        return json({ ok: true });
+      }
+      if (action === 'playlists/new' && req.method === 'POST') {
+        const b = await readJson<{ title?: string; private?: boolean }>(req);
+        const title = (b?.title ?? '').trim().slice(0, 120);
+        if (!title) return err(400, 'Name the playlist');
+        return json({ id: await createPlaylistWith(env, s, kind, itemId, title, b?.private !== false) }, 201);
+      }
     } catch (e) {
-      return json({ saved: on, docebo: 'failed', message: (e as Error).message });
+      return doceboErr(e);
     }
   }
 

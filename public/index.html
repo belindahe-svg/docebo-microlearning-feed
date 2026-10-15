@@ -12,6 +12,9 @@
   <main class="stage">
     <header class="topbar" id="topbar" hidden>
       <div class="toprow">
+        <button type="button" class="postbtn" id="postBtn" aria-label="Share content to Docebo">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
         <div class="filters" id="filters" role="toolbar" aria-label="Filter the feed"></div>
         <button type="button" class="searchbtn" id="searchBtn" aria-label="Search the feed" aria-expanded="false">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -61,6 +64,50 @@
           <ul class="ulist" id="ulist"></ul>
           <button type="button" class="sendinv" id="sendInvite" disabled>Send invite</button>
         </div>
+      </div>
+    </section>
+
+    <section class="sheet" id="plSheet" aria-label="Add to playlist" aria-hidden="true">
+      <header>
+        <b>Add to playlist</b>
+        <button type="button" class="closeX" data-close="plSheet" aria-label="Close playlists">×</button>
+      </header>
+      <div class="sharebody">
+        <ul class="ulist" id="plList"></ul>
+        <form class="newpl" id="newPl">
+          <input id="newPlName" maxlength="120" placeholder="New playlist name" autocomplete="off" aria-label="New playlist name">
+          <label class="priv"><input type="checkbox" id="newPlPrivate" checked> Private</label>
+          <button type="submit">Create</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="sheet tall" id="postSheet" aria-label="Share content" aria-hidden="true">
+      <header>
+        <b>Share content</b>
+        <button type="button" class="closeX" data-close="postSheet" aria-label="Close share content">×</button>
+      </header>
+      <div class="sharebody">
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" class="tab" data-tab="upload" aria-selected="true">Upload</button>
+          <button type="button" role="tab" class="tab" data-tab="link" aria-selected="false">Link</button>
+        </div>
+        <form class="postform" id="postForm">
+          <div data-pane="upload">
+            <label class="filepick"><input type="file" id="postFile" accept="video/*,image/*,application/pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt"><span id="postFileLabel">Choose a video, image or document</span></label>
+          </div>
+          <div data-pane="link" hidden>
+            <input id="postUrl" type="url" inputmode="url" placeholder="https://… (web page, YouTube, Vimeo, Wistia)" aria-label="Link">
+            <div class="linkprev" id="linkPrev" hidden></div>
+          </div>
+          <input id="postTitle" maxlength="200" placeholder="Title" aria-label="Title" required>
+          <textarea id="postDesc" maxlength="2000" rows="2" placeholder="Description (optional)" aria-label="Description"></textarea>
+          <p class="lbl">Publish to channels</p>
+          <ul class="ulist chanlist" id="postChannels"><li class="empty">Loading channels</li></ul>
+          <p class="hint" id="postNote">Channels may need an expert to approve new content before it appears.</p>
+          <div class="progress" id="postProgress" hidden><i></i></div>
+          <button type="submit" class="sendinv" id="postSubmit">Publish</button>
+        </form>
       </div>
     </section>
 
