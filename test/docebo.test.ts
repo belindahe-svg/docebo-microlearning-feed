@@ -76,3 +76,21 @@ describe('channel asset rows (confirmed shape)', () => {
     expect(normalizeItem({ ...row, uri: '/learn/learning-plans/5' }, 'd')!.kind).toBe('learning_plan');
   });
 });
+
+import { assetMediaFrom, youtubeIdFrom } from '../src/docebo';
+describe('asset media', () => {
+  it('parses YouTube IDs from common URL forms', () => {
+    expect(youtubeIdFrom('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=3')).toBe('dQw4w9WgXcQ');
+    expect(youtubeIdFrom('https://youtu.be/dQw4w9WgXcQ?si=x')).toBe('dQw4w9WgXcQ');
+    expect(youtubeIdFrom('https://www.youtube.com/embed/dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+    expect(youtubeIdFrom('https://hbr.org/2020/01/x')).toBeUndefined();
+  });
+  it('reads the confirmed Docebo asset detail shape', () => {
+    const yt = assetMediaFrom({ data: { player: { player_type: 'embeded', config: { total_pages: 1 }, content: {
+      sources: [{ url: 'https://youtu.be/dQw4w9WgXcQ?si=abc' }], thumbnail: { cover: 'https://cdn1.dcbstatic.com/c.jpg' } } } } });
+    expect(yt).toEqual({ youtubeId: 'dQw4w9WgXcQ', thumbnailUrl: 'https://cdn1.dcbstatic.com/c.jpg', subtype: 'Video' });
+    const link = assetMediaFrom({ data: { player: { player_type: 'link_player', content: { sources: [{ url: 'https://hbr.org/x' }] } } } });
+    expect(link.subtype).toBe('Link');
+    expect(link.youtubeId).toBeUndefined();
+  });
+});

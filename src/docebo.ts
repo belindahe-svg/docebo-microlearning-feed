@@ -187,3 +187,69 @@ export async function recordAssetView(env: Env, token: string | null, assetId: s
   });
   return res.ok;
 }
+
+/** What the feed needs from an asset's detail record to play or preview it. */
+export interface AssetMedia {
+  youtubeId?: string;
+  thumbnailUrl?: string;
+  subtype?: string;
+}
+
+/** YouTube video ID from watch, youtu.be, embed or shorts URLs. */
+export function youtubeIdFrom(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  let u: URL;
+  try { u = new URL(url); } catch { return undefined; }
+  const host = u.hostname.replace(/^www\.|^m\./, '');
+  let id: string | null | undefined;
+  if (host === 'youtu.be') id = u.pathname.split('/')[1];
+  else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+    id = u.searchParams.get('v') ?? /^\/(?:embed|shorts|live|v)\/([^/?#]+)/.exec(u.pathname)?.[1];
+  }
+  return id && /^[\w-]{11}$/.test(id) ? id : undefined;
+}
+
+/**
+ * Read an asset detail (GET /share/v1/assets/{id}). Confirmed on atalentdemo2: video assets use
+ * player_type "embeded" with the source URL in player.content.sources[0].url (YouTube there);
+ * links use player_type "link_player"; thumbnails sit in player.content.thumbnail.
+ */
+export function assetMediaFrom(body: unknown): AssetMedia {
+  const b = body as Json;
+  const d = (b?.data ?? b) as Json;
+  const p = (d?.player ?? {}) as Json;
+  const c = (p.content ?? {}) as Json;
+  const sources = Array.isArray(c.sources) ? (c.sources as Json[]) : [];
+  const urls = [...sources.map((s) => str(s?.url ?? s?.src)), str(c.name_original)].filter(Boolean) as string[];
+  const youtubeId = urls.map(youtubeIdFrom).find(Boolean);
+  const thumb = (c.thumbnail ?? {}) as Json;
+  const thumbnailUrl =
+    str(thumb.cover) ?? str(thumb.rectangular) ?? str(thumb.original) ??
+    (typeof d?.thumbnail === 'string' ? str(d.thumbnail) : str((d?.thumbnail as Json)?.url)) ??
+    (youtubeId ? `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg` : undefined);
+  const playerType = String(p.player_type ?? '').toLowerCase();
+  const config = (p.config ?? {}) as Json;
+  const subtype = youtubeId || /vimeo|wistia|\.mp4|\.m3u8/i.test(urls.join(' '))
+    ? 'Video'
+    : playerType.includes('link')
+      ? 'Link'
+      : config.total_pages
+        ? 'Document'
+        : undefined;
+  return { youtubeId, thumbnailUrl, subtype };
+}
+
+// Per-isolate cache: asset media rarely changes, and this keeps repeat scrolls off the Docebo API.
+const mediaCache = new Map<string, { at: number; v: AssetMedia }>();
+const MEDIA_TTL_MS = 30 * 60 * 1000;
+
+export async function getAssetMedia(env: Env, token: string | null, assetId: string): Promise<AssetMedia> {
+  if (env.DOCEBO_MODE !== 'live' || !token) return {};
+  const key = `${env.DOCEBO_DOMAIN}:${assetId}`;
+  const hit = mediaCache.get(key);
+  if (hit && Date.now() - hit.at < MEDIA_TTL_MS) return hit.v;
+  const v = assetMediaFrom(await doceboGet(env, token, `/share/v1/assets/${encodeURIComponent(assetId)}`));
+  if (mediaCache.size > 2000) mediaCache.clear();
+  mediaCache.set(key, { at: Date.now(), v });
+  return v;
+}

@@ -1,6 +1,6 @@
 import type { Env, Session } from './types';
 import { createSession, exchangeAuthCode, getSession, readIframeParams, timingSafeEqual, verifyIframeHash } from './auth';
-import { getChannelItems, recordAssetView } from './docebo';
+import { getAssetMedia, getChannelItems, recordAssetView } from './docebo';
 import { isDiscoveryUser, runDiscovery } from './discover';
 import {
   ITEM_KEY_RE,
@@ -137,6 +137,15 @@ async function route(req: Request, env: Env): Promise<Response> {
     if (!isDiscoveryUser(env, s.user_id, s.username)) return err(403, 'Discovery is not enabled for this user');
     if (!s.access_token) return err(400, 'Discovery needs live mode (a real Docebo session)');
     return json({ domain: env.DOCEBO_DOMAIN, channelId: env.DOCEBO_CHANNEL_ID || null, results: await runDiscovery(env, s.access_token) });
+  }
+
+  const assetMedia = /^\/api\/assets\/(\d+)\/media$/.exec(path);
+  if (assetMedia && req.method === 'GET') {
+    try {
+      return json(await getAssetMedia(env, s.access_token, assetMedia[1]));
+    } catch (e) {
+      return err(502, (e as Error).message);
+    }
   }
 
   const delComment = /^\/api\/comments\/(\d+)$/.exec(path);

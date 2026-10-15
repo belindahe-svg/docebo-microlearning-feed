@@ -120,6 +120,7 @@
       for (const e of entries) if (e.isIntersecting && e.intersectionRatio >= 0.6) activate(Number(e.target.dataset.i));
     }, { root: feedEl, threshold: [0.6] });
     cards.forEach((c) => io.observe(c));
+    for (let k = 0; k < 4; k++) enrich(k);
   }
 
   // ---------- video ----------
@@ -148,13 +149,63 @@
     v.addEventListener('error', () => toast(`This video can't play here. Use "Open in Docebo" instead.`));
   }
 
+  // ---------- asset media (lazy) ----------
+  // Asset cards arrive without thumbnails or video info; fetch them as cards come near the viewport.
+  const mediaReq = new Map();
+  function enrich(i) {
+    const it = items[i];
+    if (!it || it.kind !== 'asset' || mediaReq.has(i)) return;
+    mediaReq.set(i, api(`/api/assets/${encodeURIComponent(it.id)}/media`)
+      .then((m) => applyMedia(i, m))
+      .catch(() => {}));
+  }
+
+  function applyMedia(i, m) {
+    const it = items[i];
+    const card = cards[i];
+    if (!it || !card) return;
+    if (m.subtype) it.subtype = m.subtype;
+    if (m.thumbnailUrl && !it.thumbnailUrl) it.thumbnailUrl = m.thumbnailUrl;
+    const chip = card.querySelector('.chips .chip');
+    if (chip) chip.textContent = kindLabel(it);
+    const art = card.querySelector('.art');
+    if (art && it.thumbnailUrl && !art.querySelector('img')) {
+      art.insertAdjacentHTML('afterbegin', `<img alt="" src="${esc(it.thumbnailUrl)}">`);
+    }
+    if (m.youtubeId && !it.videoUrl) {
+      it.youtubeId = m.youtubeId;
+      card.classList.add('yt', 'paused');
+      if (!card.querySelector('.playstate')) card.insertAdjacentHTML('beforeend', `<div class="playstate">${ICON.play}</div>`);
+    }
+  }
+
+  function startYouTube(card, it) {
+    if (card.querySelector('iframe.ytframe')) return;
+    const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(it.youtubeId)}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
+    card.insertAdjacentHTML('beforeend', `<iframe class="ytframe" src="${src}" title="${esc(it.title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`);
+    card.classList.remove('paused');
+    card.classList.add('playing');
+    // Feed analytics only: "started" in this app. Docebo's own view record needs "Open in Docebo".
+    api(`/api/items/${encodeURIComponent(it.key)}/progress`, { method: 'POST', body: JSON.stringify({ percent: 1 }) }).catch(() => {});
+  }
+
+  function stopYouTube(card) {
+    const f = card?.querySelector('iframe.ytframe');
+    if (!f) return;
+    f.remove();
+    card.classList.remove('playing');
+    card.classList.add('paused');
+  }
+
   function activate(i) {
     if (i === cur) return;
     if (cur >= 0) {
       const pv = cards[cur].querySelector('video');
       if (pv) pv.pause();
+      stopYouTube(cards[cur]);
     }
     cur = i;
+    for (let k = i; k <= i + 3; k++) enrich(k);
     const v = cards[i].querySelector('video');
     if (v) {
       v.muted = muted;
@@ -163,6 +214,12 @@
   }
 
   function togglePlay(card) {
+    const it = items[Number(card.dataset.i)];
+    if (it?.youtubeId) {
+      if (card.querySelector('iframe.ytframe')) stopYouTube(card);
+      else startYouTube(card, it);
+      return;
+    }
     const v = card.querySelector('video');
     if (!v) return;
     if (v.paused) { v.play().catch(() => {}); card.classList.remove('paused'); }
