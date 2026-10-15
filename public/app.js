@@ -97,6 +97,27 @@
   const canRateKind = (it) => it.kind === 'asset' || it.kind === 'course';
   const rateLabel = (it) => (it.myRating ? `${it.myRating}★` : 'Rate');
 
+  // Bottom-left text block. Courses and learning plans get Docebo's description, a facts line,
+  // the learner's progress and (plans) the courses inside, since they open in Docebo to play.
+  function metaInner(it) {
+    const rich = it.kind === 'course' || it.kind === 'learning_plan';
+    const facts = (it.facts || []).length ? `<p class="facts">${it.facts.map(esc).join(' · ')}</p>` : '';
+    const progress = typeof it.progress === 'number'
+      ? `<div class="lpbar" role="progressbar" aria-valuenow="${it.progress}" aria-valuemin="0" aria-valuemax="100" aria-label="Plan progress"><i style="width:${it.progress}%"></i></div><p class="facts">${it.progress}% complete</p>` : '';
+    const more = (it.courseCount || 0) - 3;
+    const lp = (it.lpCourses || []).length
+      ? `<ol class="lpcourses">${it.lpCourses.slice(0, 3).map((c) => `<li>${esc(c)}</li>`).join('')}${more > 0 ? `<li class="more">and ${more} more</li>` : ''}</ol>` : '';
+    return `
+        <div class="chips">${it.myStatus ? `<span class="chip st-${esc(it.myStatus.tone)}">${esc(it.myStatus.label)}</span>` : ''}<span class="chip kind">${esc(kindLabel(it))}</span>${statusChip(it.status)}${it.rating ? `<span class="chip">★ ${esc(it.rating)}</span>` : ''}</div>
+        <p class="ttl">${esc(it.title)}</p>
+        ${facts}
+        ${it.description ? `<p class="desc${rich ? ' long' : ''}">${esc(it.description)}</p>` : ''}
+        ${lp}
+        ${progress}
+        <a class="cta" href="${esc(it.doceboUrl)}" target="_top">${ctaLabel(it)}</a>${it.myStatus?.canDelete ? '<button type="button" class="delmine">Delete</button>' : ''}
+      `;
+  }
+
   function cardHtml(it, i) {
     const [c1, c2] = PALETTE[i % PALETTE.length];
     const e = it.engagement;
@@ -111,12 +132,7 @@
       ${visual}
       ${yt ? `<div class="playstate">${ICON.play}</div>` : ''}
       <div class="shade"></div>
-      <div class="meta">
-        <div class="chips">${it.myStatus ? `<span class="chip st-${esc(it.myStatus.tone)}">${esc(it.myStatus.label)}</span>` : ''}<span class="chip kind">${esc(kindLabel(it))}</span>${statusChip(it.status)}${it.rating ? `<span class="chip">★ ${esc(it.rating)}</span>` : ''}</div>
-        <p class="ttl">${esc(it.title)}</p>
-        ${it.description ? `<p class="desc">${esc(it.description)}</p>` : ''}
-        <a class="cta" href="${esc(it.doceboUrl)}" target="_top">${ctaLabel(it)}</a>${it.myStatus?.canDelete ? '<button type="button" class="delmine">Delete</button>' : ''}
-      </div>
+      <div class="meta">${metaInner(it)}</div>
       <div class="rail">
         <button type="button" class="rbtn com" aria-label="Comments">${ICON.chat}<span>${e.comments}</span></button>
         ${canRateKind(it) ? `<button type="button" class="rbtn rate" aria-pressed="${!!it.myRating}" aria-label="Rate in Docebo">${ICON.star}<span>${rateLabel(it)}</span></button>` : ''}
@@ -194,6 +210,14 @@
   // Asset cards arrive without thumbnails or video info; fetch them as cards come near the viewport.
   const mediaReq = new Map(); // item key -> promise
   function enrichItem(it) {
+    if (it && (it.kind === 'course' || it.kind === 'learning_plan')) {
+      if (!mediaReq.has(it.key)) {
+        mediaReq.set(it.key, api(`/api/items/${encodeURIComponent(it.key)}/details`)
+          .then((d) => applyDetails(it, d))
+          .catch(() => {}));
+      }
+      return mediaReq.get(it.key);
+    }
     if (!it || it.kind !== 'asset') return Promise.resolve();
     if (!mediaReq.has(it.key)) {
       mediaReq.set(it.key, api(`/api/assets/${encodeURIComponent(it.id)}/media`)
@@ -203,6 +227,23 @@
     return mediaReq.get(it.key);
   }
   function enrich(i) { enrichItem(items[i]); }
+
+  function applyDetails(it, d) {
+    if (d.description) it.description = d.description;
+    it.facts = d.facts || [];
+    if (d.status) it.status = d.status;
+    if (typeof d.progress === 'number') it.progress = d.progress;
+    if (d.courses?.length) { it.lpCourses = d.courses; it.courseCount = d.courseCount; }
+    const card = cards[items.indexOf(it)];
+    if (!card) return;
+    if (d.thumbnailUrl && !it.thumbnailUrl) {
+      it.thumbnailUrl = d.thumbnailUrl;
+      const art = card.querySelector('.art');
+      if (art && !art.querySelector('img')) art.insertAdjacentHTML('afterbegin', `<img alt="" src="${esc(it.thumbnailUrl)}">`);
+    }
+    card.querySelector('.meta').innerHTML = metaInner(it);
+    card.classList.add('rich');
+  }
 
   // Swap a rendered card for a fresh one (e.g. once we learn it is a playable video).
   function replaceCard(i) {

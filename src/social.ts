@@ -481,3 +481,86 @@ export async function deleteMyAsset(env: Env, s: Session, id: string): Promise<v
   if (!live(env, s)) throw new DoceboError(400, 'Deleting needs live mode');
   await doceboCall(env, s.access_token, 'DELETE', `/share/v1/assets/${encodeURIComponent(id)}`);
 }
+
+// ---------- Course / learning plan details for cards that open in Docebo ----------
+
+export interface LearnDetails {
+  description?: string;
+  facts: string[];            // short facts shown as a line under the title
+  status?: string;            // learner's status label
+  progress?: number;          // 0-100 for learning plans
+  courses?: string[];         // course names inside a learning plan
+  courseCount?: number;
+  thumbnailUrl?: string;
+}
+
+/** Plain text from Docebo's HTML descriptions. */
+export function htmlToText(html: unknown): string {
+  return String(html ?? '')
+    .replace(/<\s*(br|\/p|\/li|\/h\d)\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'")
+    .replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+}
+
+const COURSE_TYPES: Record<string, string> = { elearning: 'E-learning', classroom: 'Classroom', webinar: 'Webinar' };
+const STATUS_LABELS: Record<string, string> = {
+  subscribed: 'Enrolled', enrolled: 'Enrolled', not_started: 'Not started', in_progress: 'In progress', 'in progress': 'In progress',
+  completed: 'Completed', waiting: 'Waiting list', suspended: 'Suspended', overbooking: 'Overbooking',
+};
+
+function minutes(v: unknown): string | undefined {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n < 60 ? `${Math.round(n)} min` : `${Math.floor(n / 60)} h${n % 60 ? ` ${Math.round(n % 60)} min` : ''}`;
+}
+
+export async function learnDetails(env: Env, s: Session, kind: string, id: string): Promise<LearnDetails> {
+  if (!live(env, s)) return { facts: [] };
+  if (kind === 'course') {
+    const d = dataOf(await doceboCall(env, s.access_token, 'GET', `/learn/v1/courses/${encodeURIComponent(id)}`));
+    const los = Array.isArray(d.flat_los) ? (d.flat_los as Json[]) : [];
+    const lessons = los.reduce((n, l) => n + (Number(l.items_count) || 0), 0) || (Array.isArray(d.tree) ? (d.tree as Json[]).filter((x) => !x.is_folder).length : 0);
+    const credits = Number(d.credits);
+    const category = (d.category as Json)?.name;
+    const facts = [
+      COURSE_TYPES[String(d.type)] ?? (d.type ? String(d.type) : undefined),
+      lessons ? `${lessons} lesson${lessons === 1 ? '' : 's'}` : undefined,
+      minutes(d.duration),
+      d.lang_label ? String(d.lang_label) : undefined,
+      credits > 0 ? `${credits} credit${credits === 1 ? '' : 's'}` : undefined,
+      category ? String(category) : undefined,
+    ].filter(Boolean) as string[];
+    const st = String(d.status ?? '').toLowerCase();
+    const bg = (d.background_image as Json)?.url;
+    return {
+      description: htmlToText(d.description) || htmlToText(d.short_description) || undefined,
+      facts,
+      status: STATUS_LABELS[st] ?? (st ? st.replace(/_/g, ' ') : undefined),
+      thumbnailUrl: typeof bg === 'string' && bg ? (bg.startsWith('//') ? `https:${bg}` : bg) : undefined,
+    };
+  }
+  if (kind === 'learning_plan') {
+    const d = dataOf(await doceboCall(env, s.access_token, 'GET', `/learn/v1/lp/${encodeURIComponent(id)}`));
+    const courses = Array.isArray(d.courses) ? (d.courses as Json[]) : [];
+    const credits = Number(d.credits);
+    const pct = Number(d.complete_percent);
+    const st = String(d.status ?? '').toLowerCase();
+    const facts = [
+      courses.length ? `${courses.length} course${courses.length === 1 ? '' : 's'}` : undefined,
+      minutes(d.total_duration),
+      d.is_certification ? 'Certification' : undefined,
+      credits > 0 ? `${credits} credit${credits === 1 ? '' : 's'}` : undefined,
+    ].filter(Boolean) as string[];
+    return {
+      description: htmlToText(d.description) || htmlToText(d.short_description) || undefined,
+      facts,
+      status: STATUS_LABELS[st] ?? (st ? st.replace(/_/g, ' ') : undefined),
+      progress: Number.isFinite(pct) && d.is_assigned !== false ? Math.max(0, Math.min(100, pct)) : undefined,
+      courses: courses.map((c) => String(c.name ?? '')).filter(Boolean).slice(0, 8),
+      courseCount: courses.length,
+    };
+  }
+  return { facts: [] };
+}

@@ -173,3 +173,15 @@ html,body{overflow:hidden}
 .chip.st-bad{background:#ff8a8a;color:#3b0a0a}
 .chip.st-draft{background:rgba(255,255,255,.85);color:#1d1a26}
 .delmine{margin-left:8px;border:1px solid rgba(255,255,255,.6);background:rgba(0,0,0,.35);color:#fff;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:600}
+
+/* Course and learning plan detail on cards that open in Docebo */
+.facts{font-size:12px;opacity:.85;margin:-2px 0 8px;font-weight:500}
+.desc.long{-webkit-line-clamp:4;line-height:1.4}
+.lpcourses{margin:0 0 10px;padding:0 0 0 18px;font-size:12.5px;line-height:1.5;opacity:.92}
+.lpcourses li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lpcourses .more{list-style:none;margin-left:-18px;opacity:.75}
+.lpbar{height:5px;border-radius:999px;background:rgba(255,255,255,.25);overflow:hidden;margin:2px 0 4px;max-width:260px}
+.lpbar i{display:block;height:100%;background:#7fcf9c;border-radius:999px}
+/* Detail cards: move the big poster title up and darken the lower half so the text reads well */
+.card.rich .big{top:12%}
+.card.rich .shade{background:linear-gradient(180deg,rgba(0,0,0,.05) 25%,rgba(0,0,0,.85) 70%)}

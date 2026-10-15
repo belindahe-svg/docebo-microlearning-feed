@@ -24,3 +24,11 @@ describe('Docebo content types for uploads', () => {
     expect(contentTypeFor('application/octet-stream', 'a.bin')).toBe(10);
   });
 });
+
+import { htmlToText } from '../src/social';
+describe('Docebo HTML descriptions', () => {
+  it('turns course HTML into readable text', () => {
+    expect(htmlToText('<p>Our anti-corruption training&nbsp;provides the <b>skillset</b>.</p><ul><li>One</li><li>Two &amp; three</li></ul>'))
+      .toBe('Our anti-corruption training provides the skillset.\nOne\nTwo & three');
+  });
+});

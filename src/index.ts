@@ -16,6 +16,7 @@ import {
   contributeLink,
   createPlaylistWith,
   deleteMyAsset,
+  learnDetails,
   linkMeta,
   logStep,
   myContributions,
@@ -278,7 +279,7 @@ async function route(req: Request, env: Env): Promise<Response> {
     return (await deleteOwnComment(env, Number(delComment[2]), s.user_id)) ? json({ ok: true }) : err(404, 'Comment not found');
   }
 
-  const m = /^\/api\/items\/([^/]+)\/(like|save|comments|progress|rating|invite|playlists|playlists\/new)$/.exec(path);
+  const m = /^\/api\/items\/([^/]+)\/(like|save|comments|progress|rating|invite|playlists|playlists\/new|details)$/.exec(path);
   if (!m) return err(404, 'Not found');
   const key = decodeURIComponent(m[1]);
   if (!ITEM_KEY_RE.test(key)) return err(400, 'Invalid item key');
@@ -300,6 +301,16 @@ async function route(req: Request, env: Env): Promise<Response> {
     const on = b?.on !== false;
     await setFlag(env, 'saves', key, s.user_id, on);
     return json({ saved: on });
+  }
+
+  // Course / learning plan details for cards that open in Docebo.
+  if (action === 'details' && req.method === 'GET') {
+    if (kind !== 'course' && kind !== 'learning_plan') return err(400, 'Details are for courses and learning plans');
+    try {
+      return json(await learnDetails(env, s, kind, itemId));
+    } catch (e) {
+      return doceboErr(e);
+    }
   }
 
   // Docebo "Add to playlist": the learner's playlists, toggle membership, or create a new one.

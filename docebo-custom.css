@@ -1,0 +1,5 @@
+/* aTalent micro-learning feed: paste into Docebo > Admin Menu > Configure Branding and Look > Custom CSS.
+   Hides the page title bar on the "IG Style" widget page only (page URL /pages/75/ig-style). */
+main.app-layout-main:has(> #doc-page-75) > app-layout-title-bar {
+  display: none !important;
+}
