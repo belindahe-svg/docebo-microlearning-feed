@@ -16,6 +16,7 @@ import {
   contributeLink,
   createPlaylistWith,
   linkMeta,
+  logStep,
   listPlaylistsFor,
   setPlaylistItem,
   trackAssetView,
@@ -207,6 +208,7 @@ async function route(req: Request, env: Env): Promise<Response> {
         const mime = (url.searchParams.get('mime') ?? 'application/octet-stream').slice(0, 100);
         if (!filename) return err(400, 'Missing file name');
         const len = Number(req.headers.get('Content-Length') ?? 0);
+        await logStep(env, s.user_id, 'upload-received', true, undefined, `name=.${filename.split('.').pop()} mime=${mime} len=${req.headers.get('Content-Length')}`);
         if (len > 95 * 1024 * 1024) return err(413, 'Files up to 95 MB can be shared from the feed. Use Docebo for larger files.');
         return json({ storedName: await uploadToDocebo(env, s, filename, mime, req.body, req.headers.get('Content-Length')) });
       }
@@ -223,12 +225,14 @@ async function route(req: Request, env: Env): Promise<Response> {
           return json({ id }, 201);
         }
         if (b?.type === 'file') {
+          await logStep(env, s.user_id, 'publish-received', true, undefined, `stored=${!!b.storedName} channels=${channels.join(',')}`);
           if (!b.storedName || !/^[\w.-]+$/.test(b.storedName)) return err(400, 'Upload the file first');
           return json(await contributeFile(env, s, { storedName: b.storedName, originalName: (b.originalName ?? b.storedName).slice(0, 200), mime: b.mime ?? '', title, description, channels }), 201);
         }
         return err(400, 'Unknown contribution type');
       }
     } catch (e) {
+      await logStep(env, s.user_id, `error ${path}`, false, (e as DoceboError).status, (e as Error).message);
       return doceboErr(e);
     }
     return err(404, 'Not found');

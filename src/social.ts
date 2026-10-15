@@ -255,6 +255,14 @@ export async function createPlaylistWith(env: Env, s: Session, kind: string, id:
 
 // ---------- Contribute (Docebo "Share content") ----------
 
+/** Best-effort diagnostics for the contribute flow (status codes and short errors only). */
+export async function logStep(env: Env, userId: string, step: string, ok: boolean, status?: number, detail?: string): Promise<void> {
+  try {
+    await env.DB.prepare('INSERT INTO contrib_log (user_id, step, ok, status, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(userId, step, ok ? 1 : 0, status ?? null, (detail ?? '').slice(0, 500), Math.floor(Date.now() / 1000)).run();
+  } catch { /* diagnostics must never break the flow */ }
+}
+
 export interface ChannelOption {
   id: number;
   name: string;
@@ -321,7 +329,14 @@ export async function uploadToDocebo(env: Env, s: Session, filename: string, mim
   if (!live(env, s)) throw new DoceboError(400, 'Uploading needs live mode');
   if (!body) throw new DoceboError(400, 'No file received');
   const q = new URLSearchParams({ filename, mime, collection: 'app7020' });
-  const d = dataOf(await doceboCall(env, s.access_token, 'GET', `/manage/v1/upload/presigned_url?${q}`));
+  let d: Json;
+  try {
+    d = dataOf(await doceboCall(env, s.access_token, 'GET', `/manage/v1/upload/presigned_url?${q}`));
+    await logStep(env, s.user_id, 'presign', true, 200, `mime=${mime}`);
+  } catch (e) {
+    await logStep(env, s.user_id, 'presign', false, (e as DoceboError).status, (e as Error).message);
+    throw e;
+  }
   const url = String(d.url ?? '');
   const stored = String(d.fileName ?? d.filename_hashed ?? '');
   if (!url || !stored) throw new DoceboError(502, 'Docebo did not return an upload URL');
@@ -344,8 +359,11 @@ export async function uploadToDocebo(env: Env, s: Session, filename: string, mim
   if (!res.ok) {
     const text = (await res.text().catch(() => '')).replace(/\s+/g, ' ');
     const code = /<Code>([^<]+)<\/Code>/.exec(text)?.[1];
+    const msg = /<Message>([^<]+)<\/Message>/.exec(text)?.[1];
+    await logStep(env, s.user_id, 's3-put', false, res.status, `${code ?? ''} ${msg ?? text.slice(0, 200)} len=${length}`);
     throw new DoceboError(502, `Upload to Docebo storage failed (${res.status}${code ? ` ${code}` : ''})`);
   }
+  await logStep(env, s.user_id, 's3-put', true, res.status, `len=${length}`);
   return stored;
 }
 
@@ -362,8 +380,12 @@ export async function contributeFile(env: Env, s: Session, a: { storedName: stri
     description: a.description,
     tags: [],
     skill_codes: [],
+  }).catch(async (e) => {
+    await logStep(env, s.user_id, 'asset-create', false, (e as DoceboError).status, (e as Error).message);
+    throw e;
   });
   const id = Number(dataOf(j).id);
+  await logStep(env, s.user_id, 'asset-create', Number.isFinite(id) && id > 0, 200, `id=${id} body=${JSON.stringify(j).slice(0, 200)}`);
   if (!Number.isFinite(id) || id <= 0) throw new DoceboError(502, 'Docebo did not return the new asset');
   let channelErrors: string | undefined;
   if (a.channels.length) {
@@ -371,8 +393,10 @@ export async function contributeFile(env: Env, s: Session, a: { storedName: stri
       const r = dataOf(await doceboCall(env, s.access_token, 'PUT', `/share/v1/assets/${id}/channels`, { channels: a.channels }));
       const errs = r.errors;
       if (errs && (Array.isArray(errs) ? errs.length : Object.keys(errs as Json).length)) channelErrors = JSON.stringify(errs).slice(0, 200);
+      await logStep(env, s.user_id, 'channels', !channelErrors, 200, `${a.channels.join(',')} ${channelErrors ?? JSON.stringify(r).slice(0, 150)}`);
     } catch (e) {
       channelErrors = (e as Error).message;
+      await logStep(env, s.user_id, 'channels', false, (e as DoceboError).status, channelErrors);
     }
   }
   return { id, channelErrors };
