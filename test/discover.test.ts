@@ -50,3 +50,13 @@ describe('value checks', () => {
     expect(describeItemValues({ data: { items: [{ type_id: 1, content_type: 'video', uri: '/x' }, { type_id: 1, content_type: 'course' }] } })).toContain('content_type: video, course');
   });
 });
+
+import { urlShapes } from '../src/discover';
+describe('url shapes', () => {
+  it('reports host and extension only', () => {
+    const out = urlShapes({ content: { sources: [{ src: 'https://cdn.example.com/a/b/c.mp4?sig=SECRET' }, { src: '/files/x' }] } });
+    expect(out[0]).toBe('player.content.sources[0].src -> cdn.example.com [.mp4, signed/query]');
+    expect(out[1]).toContain('(relative) [no ext]');
+    expect(out.join(' ')).not.toContain('SECRET');
+  });
+});

@@ -128,7 +128,27 @@ export async function runDiscovery(env: Env, token: string) {
       .slice(0, 4)
       .map((i) => `\n       ${i.key} [${i.subtype || '-'}] "${i.title}" -> ${i.doceboUrl}${i.thumbnailUrl ? ' (thumb)' : ''}`)
       .join('');
-    results.push({ label: 'Feed preview', path: '', status: 'INFO', detail: `${items.length} cards. Kinds: ${JSON.stringify(kinds)}${sample}` });
+    const subtypes = (k: string) => [...new Set(items.filter((i) => i.kind === k).map((i) => i.subtype || '-'))].slice(0, 8).join(', ');
+    const assetSample = items
+      .filter((i) => i.kind === 'asset')
+      .slice(0, 3)
+      .map((i) => `\n       ${i.key} [${i.subtype || '-'}] "${i.title}" -> ${i.doceboUrl}`)
+      .join('');
+    results.push({
+      label: 'Feed preview',
+      path: '',
+      status: 'INFO',
+      detail: `${items.length} cards. Kinds: ${JSON.stringify(kinds)} | asset types: ${subtypes('asset')} | course types: ${subtypes('course')}${sample}${assetSample}`,
+    });
+    // Player check on real assets from the feed, videos first (asset #${assetId} above may be a document).
+    const assets = items.filter((i) => i.kind === 'asset');
+    const picks = [...assets.filter((i) => /video|mp4|media/i.test(i.subtype)), ...assets].filter((x, i, a) => a.indexOf(x) === i).slice(0, 2);
+    for (const a of picks) {
+      if (a.id === assetId) continue;
+      const path = `/share/v1/assets/${encodeURIComponent(a.id)}`;
+      const body = await probe(`Asset #${a.id} [${a.subtype || '-'}] detail`, path);
+      if (body !== undefined) results.push({ label: `Asset #${a.id} player`, path: '', status: 'INFO', detail: describePlayer(body) });
+    }
   } catch (e) {
     results.push({ label: 'Feed preview', path: '', status: 'FAIL', detail: (e as Error).message });
   }
@@ -172,8 +192,26 @@ export function describePlayer(body: unknown): string {
   const keys = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v as Json).join(', ') : typeof v);
   const media = findMediaPaths(p);
   return (
-    `kind: ${String(data?.kind ?? '-')} | player_type: ${String(p.player_type ?? '-')} | content_type: ${String(p.content_type ?? '-')}` +
+    `kind: ${data?.kind && typeof data.kind === 'object' ? `{${keys(data.kind)}}` : String(data?.kind ?? '-')} | player_type: ${String(p.player_type ?? '-')} | content_type: ${String(p.content_type ?? '-')}` +
     ` | config: ${keys(p.config)} | content: ${keys(p.content)}` +
     ` | streamable file: ${media.length ? media.slice(0, 4).join('; ') : 'none found'}`
+    + ` | URLs in player: ${urlShapes(p).slice(0, 6).join('; ') || 'none'}`
   );
+}
+
+/** Every URL-valued string under the player, reported as key path + host + extension (no path or query). */
+export function urlShapes(v: unknown, path = 'player', out: string[] = []): string[] {
+  if (typeof v === 'string') {
+    if (/^(https?:)?\/\//i.test(v) || /^\/[\w-]/.test(v)) {
+      let host = '(relative)';
+      try { host = new URL(v, 'https://relative.invalid').host.replace('relative.invalid', '(relative)'); } catch { /* keep */ }
+      const ext = /\.([a-z0-9]{2,5})(\?|$)/i.exec(v.split('#')[0].split('?')[0] + '?');
+      out.push(`${path} -> ${host} [${ext ? '.' + ext[1].toLowerCase() : 'no ext'}${v.includes('?') ? ', signed/query' : ''}]`);
+    }
+  } else if (Array.isArray(v)) {
+    v.slice(0, 5).forEach((x, i) => urlShapes(x, `${path}[${i}]`, out));
+  } else if (v && typeof v === 'object') {
+    for (const [k, x] of Object.entries(v as Json)) urlShapes(x, `${path}.${k}`, out);
+  }
+  return out;
 }

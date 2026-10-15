@@ -302,9 +302,16 @@
       <h1>Endpoint check</h1>
       <p>Read-only checks run with your own Docebo session. Copy the results and paste them to Claude.</p>
       <button type="button" id="copyDiscover">Copy results</button>
+      <button type="button" id="showFeed">Show feed</button>
       <pre id="discoverText"></pre>
     </section>`;
     $('discoverText').textContent = text;
+    $('showFeed').addEventListener('click', () => {
+      statusEl.hidden = false;
+      statusEl.textContent = 'Loading';
+      feedEl.innerHTML = '';
+      loadFeed().catch((err) => { statusEl.textContent = `${err.message}`; });
+    });
     $('copyDiscover').addEventListener('click', async (e) => {
       try {
         await navigator.clipboard.writeText(text);
@@ -321,16 +328,20 @@
   }
 
   // ---------- boot ----------
+  async function loadFeed() {
+    const feed = await api('/api/feed');
+    items = feed.items;
+    if (!items.length) { statusEl.textContent = 'No items in your channels yet.'; return; }
+    statusEl.hidden = true;
+    render();
+    feedEl.focus({ preventScroll: true });
+  }
+
   (async () => {
     try {
       await startSession();
       if (startSession.discovery) return void (await showDiscovery());
-      const feed = await api('/api/feed');
-      items = feed.items;
-      if (!items.length) { statusEl.textContent = 'This channel has no items yet.'; return; }
-      statusEl.hidden = true;
-      render();
-      feedEl.focus({ preventScroll: true });
+      await loadFeed();
     } catch (err) {
       statusEl.textContent = `${err.message}`;
     }
