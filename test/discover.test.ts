@@ -38,3 +38,15 @@ describe('discovery channel choice and shapes', () => {
     expect(describeBody({ data: { id: 32, player: { url: 'x', type: 'video' } } })).toContain('player: object, fields: url, type');
   });
 });
+
+import { describePlayer, describeItemValues } from '../src/discover';
+describe('value checks', () => {
+  it('finds media file paths without printing URLs', () => {
+    const out = describePlayer({ data: { kind: 'video', player: { player_type: 'video', content: { sources: [{ src: 'https://cdn/a/b.m3u8?t=1' }] } } } });
+    expect(out).toContain('player.content.sources[0].src (.m3u8)');
+    expect(out).not.toContain('https://cdn');
+  });
+  it('lists distinct item types', () => {
+    expect(describeItemValues({ data: { items: [{ type_id: 1, content_type: 'video', uri: '/x' }, { type_id: 1, content_type: 'course' }] } })).toContain('content_type: video, course');
+  });
+});

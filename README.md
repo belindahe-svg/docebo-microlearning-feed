@@ -87,11 +87,11 @@ Everything below happens in the browser. Cloudflare builds and deploys from this
 
 | # | Question | Where it matters |
 |---|---|---|
-| 1 | Exact endpoint and field names for a Channel's items | `DOCEBO_CHANNEL_ITEMS_PATH`, `normalizeItem` |
+| 1 | ~~Endpoint for a Channel's items~~ Confirmed: `GET /learn/v1/channels/{id}/assets` (learner token). Rows: id, type_id, title, content_type, image_url, uri, rating, duration. `/learn/v1/channels` also embeds ~10 preview items per channel in `sub_items`. Note: `/share/v1/assets?channel_id=` ignores the filter | `DOCEBO_CHANNEL_ITEMS_PATH`, `normalizeItem` |
 | 2 | Does Docebo return a streamable video URL for video assets, and for how long is it valid? | Media overrides vs direct streaming |
 | 3 | Can an asset view or completion be recorded via API? | `DOCEBO_ASSET_VIEW_PATH` |
 | 4 | Do channel items include the learner's enrolment status for courses? | Status chips |
-| 5 | Exact names of the user ID and username parameters the iFrame widget appends | `readIframeParams` |
+| 5 | ~~iFrame parameter names~~ Confirmed: `user_id`, `username`, `auth_code`, `hash` | `readIframeParams` |
 | 6 | Does Docebo require `redirect_uri` on the auth-code exchange? | `DOCEBO_OAUTH_REDIRECT_URI` |
 | 7 | The iFrame widget is documented as **desktop only**. Mobile and Go.Learn need a different entry point (e.g. an external link page with SSO) | Mobile rollout |
 | 8 | Does the iframe sandbox allow `target="_top"` links, so "Open in Docebo" navigates the main page? | CTA behaviour |

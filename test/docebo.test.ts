@@ -61,3 +61,18 @@ describe('all visible channels', () => {
     expect(firstChannelId({ data: { items: [] } })).toBeUndefined();
   });
 });
+
+describe('channel asset rows (confirmed shape)', () => {
+  const row = { id: 39, type_id: 1, title: 'Time Management', content_type: 'video', image_url: 'https://cdn/x.jpg', uri: '/learn/course/39/time-management', rating: 4 };
+  it('maps uri, image_url and content_type', () => {
+    const it = normalizeItem(row, 'atalentdemo2.docebosaas.com')!;
+    expect(it.kind).toBe('course');
+    expect(it.doceboUrl).toBe('https://atalentdemo2.docebosaas.com/learn/course/39/time-management');
+    expect(it.thumbnailUrl).toBe('https://cdn/x.jpg');
+    expect(it.subtype).toBe('video');
+  });
+  it('detects assets and learning plans from the uri', () => {
+    expect(normalizeItem({ ...row, uri: '/share/asset/view/32' }, 'd')!.kind).toBe('asset');
+    expect(normalizeItem({ ...row, uri: '/learn/learning-plans/5' }, 'd')!.kind).toBe('learning_plan');
+  });
+});

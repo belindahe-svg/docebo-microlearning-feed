@@ -29,7 +29,12 @@ function pick(o: Json, ...keys: string[]): unknown {
 }
 
 export function kindOf(o: Json): ItemKind {
-  const t = String(pick(o, 'item_type', 'type', 'object_type', 'resource_type') ?? '').toLowerCase();
+  // Channel items carry a `uri` deep link; its path is the most reliable signal of the kind.
+  const uri = String(pick(o, 'uri', 'url', 'deeplink') ?? '').toLowerCase();
+  if (/learning[-_]?plans?\b|\/lp\//.test(uri)) return 'learning_plan';
+  if (/\/course\//.test(uri)) return 'course';
+  if (/\/asset|\/share\//.test(uri)) return 'asset';
+  const t = String(pick(o, 'item_type', 'type', 'object_type', 'resource_type', 'type_id', 'content_type') ?? '').toLowerCase();
   if (t.includes('plan')) return 'learning_plan';
   if (t.includes('course')) return 'course';
   return 'asset';
@@ -43,7 +48,8 @@ export function normalizeItem(o: Json, domain: string): FeedItem | null {
   if (!id || !title) return null;
   const base = `https://${domain}`;
   const slug = str(pick(o, 'slug', 'slug_name', 'item_slug')) ?? '';
-  const link = str(pick(o, 'url', 'deeplink', 'item_url', 'link'));
+  const rawLink = str(pick(o, 'uri', 'url', 'deeplink', 'item_url', 'link'));
+  const link = rawLink && rawLink.startsWith('/') ? `${base}${rawLink}` : rawLink;
   const doceboUrl =
     link && link.startsWith(base)
       ? link
@@ -63,7 +69,7 @@ export function normalizeItem(o: Json, domain: string): FeedItem | null {
     subtype,
     title,
     description: str(pick(o, 'short_description', 'description')),
-    thumbnailUrl: str(pick(o, 'thumbnail', 'thumbnail_url', 'image', 'cover')),
+    thumbnailUrl: str(pick(o, 'image_url', 'thumbnail', 'thumbnail_url', 'image', 'cover')),
     videoUrl,
     doceboUrl,
     status: str(pick(o, 'enrollment_status', 'user_status', 'status_label')),
@@ -92,21 +98,33 @@ export function channelIdOf(o: Json): string | undefined {
   return str(pick(o, 'id', 'id_channel', 'channel_id', 'idChannel'));
 }
 
-/** IDs of every channel the learner can see. Docebo filters the list by the token's user. */
-export async function listVisibleChannelIds(env: Env, token: string): Promise<string[]> {
+export interface VisibleChannel {
+  id: string;
+  /** Preview of the channel's items that Docebo embeds in the channel list (first ~10). */
+  preview: Json[];
+}
+
+/** Every channel the learner can see. Docebo filters the list by the token's user. */
+export async function listVisibleChannels(env: Env, token: string): Promise<VisibleChannel[]> {
   const path = env.DOCEBO_CHANNELS_LIST_PATH || '/learn/v1/channels';
-  const ids: string[] = [];
+  const out: VisibleChannel[] = [];
   for (let page = 1; page <= 5; page++) {
     const sep = path.includes('?') ? '&' : '?';
     const body = (await doceboGet(env, token, `${path}${sep}page=${page}&page_size=50`)) as Json;
     for (const row of extractRows(body)) {
       const id = channelIdOf(row);
-      if (id && !ids.includes(id)) ids.push(id);
+      if (id && !out.some((c) => c.id === id)) {
+        out.push({ id, preview: Array.isArray(row.sub_items) ? (row.sub_items as Json[]) : [] });
+      }
     }
     const data = (body?.data ?? {}) as Json;
     if (!data.has_more_data) break;
   }
-  return ids;
+  return out;
+}
+
+export async function listVisibleChannelIds(env: Env, token: string): Promise<string[]> {
+  return (await listVisibleChannels(env, token)).map((c) => c.id);
 }
 
 /** Merge item lists, keeping the first occurrence of each item key. */
@@ -125,9 +143,16 @@ export async function getChannelItems(env: Env, token: string | null): Promise<F
   if (env.DOCEBO_MODE !== 'live') return MOCK_ITEMS;
   if (!token) throw new Error('No Docebo token for this session');
   if (env.DOCEBO_CHANNEL_ID) return getItemsForChannel(env, token, env.DOCEBO_CHANNEL_ID);
-  const channelIds = (await listVisibleChannelIds(env, token)).slice(0, 20);
-  // One failing channel should not empty the whole feed.
-  const lists = await Promise.all(channelIds.map((id) => getItemsForChannel(env, token, id).catch(() => [])));
+  const channels = (await listVisibleChannels(env, token)).slice(0, 20);
+  // One failing channel should not empty the whole feed: fall back to the preview items
+  // Docebo embeds in the channel list.
+  const lists = await Promise.all(
+    channels.map((c) =>
+      getItemsForChannel(env, token, c.id).catch(() =>
+        c.preview.map((row) => normalizeItem(row, env.DOCEBO_DOMAIN)).filter((x): x is FeedItem => x !== null),
+      ),
+    ),
+  );
   return dedupeItems(lists);
 }
 

@@ -1,4 +1,5 @@
 import type { Env } from './types';
+import { getChannelItems } from './docebo';
 
 /**
  * Discovery mode: probes candidate Docebo endpoints with the signed-in learner's own token
@@ -87,7 +88,8 @@ export function firstChannelId(body: unknown): string | undefined {
 
 export async function runDiscovery(env: Env, token: string) {
   const assetId = env.DISCOVERY_ASSET_ID || '32';
-  const results: Array<{ label: string; path: string; status: number; detail: string }> = [];
+  const results: Array<{ label: string; path: string; status: number | string; detail: string }> = [];
+  const bodies: Record<string, unknown> = {};
   let channelId = env.DOCEBO_CHANNEL_ID;
   const probe = async (label: string, path: string) => {
     try {
@@ -96,6 +98,7 @@ export async function runDiscovery(env: Env, token: string) {
       });
       const body = res.ok ? await res.json().catch(() => ({})) : undefined;
       results.push({ label, path, status: res.status, detail: body === undefined ? '' : describeBody(body) });
+      if (body !== undefined) bodies[path] = body;
       return body;
     } catch (e) {
       results.push({ label, path, status: 0, detail: (e as Error).message });
@@ -110,5 +113,67 @@ export async function runDiscovery(env: Env, token: string) {
   for (const [label, path] of candidatePaths(channelId, assetId).filter(([, p]) => !p.endsWith('/channels'))) {
     await probe(channelId && !env.DOCEBO_CHANNEL_ID && path.includes('/channels/') ? `${label} (visible channel #${channelId})` : label, path);
   }
+
+  // Value checks: enum-like fields only (types, deep-link paths), never descriptions or user data.
+  const itemsBody = channelId ? bodies[`/learn/v1/channels/${channelId}/assets`] : undefined;
+  if (itemsBody !== undefined) results.push({ label: 'Channel item values', path: '', status: 'INFO', detail: describeItemValues(itemsBody) });
+  const assetBody = bodies[`/share/v1/assets/${assetId}`];
+  if (assetBody !== undefined) results.push({ label: `Asset #${assetId} player`, path: '', status: 'INFO', detail: describePlayer(assetBody) });
+
+  // End-to-end: the cards the feed would actually build for this learner.
+  try {
+    const items = await getChannelItems({ ...env, DOCEBO_MODE: 'live' }, token);
+    const kinds = items.reduce<Record<string, number>>((a, i) => ((a[i.kind] = (a[i.kind] ?? 0) + 1), a), {});
+    const sample = items
+      .slice(0, 4)
+      .map((i) => `\n       ${i.key} [${i.subtype || '-'}] "${i.title}" -> ${i.doceboUrl}${i.thumbnailUrl ? ' (thumb)' : ''}`)
+      .join('');
+    results.push({ label: 'Feed preview', path: '', status: 'INFO', detail: `${items.length} cards. Kinds: ${JSON.stringify(kinds)}${sample}` });
+  } catch (e) {
+    results.push({ label: 'Feed preview', path: '', status: 'FAIL', detail: (e as Error).message });
+  }
   return results;
+}
+
+function rowsOf(body: unknown): Json[] {
+  const b = body as Json;
+  const data = (b?.data ?? b) as Json;
+  const rows = (data?.items ?? data?.results ?? (Array.isArray(data) ? data : null)) as unknown;
+  return Array.isArray(rows) ? (rows as Json[]) : [];
+}
+
+function distinct(rows: Json[], key: string): string {
+  return [...new Set(rows.map((r) => r[key]).filter((v) => v !== undefined && v !== null && v !== '').map(String))].slice(0, 8).join(', ') || '(none)';
+}
+
+export function describeItemValues(body: unknown): string {
+  const rows = rowsOf(body);
+  const uris = rows.slice(0, 3).map((r) => String(r.uri ?? '')).filter(Boolean).join('  ');
+  return `type_id: ${distinct(rows, 'type_id')} | content_type: ${distinct(rows, 'content_type')} | uri examples: ${uris || '(none)'}`;
+}
+
+/** Where (if anywhere) the player holds a direct media file. Reports key paths and extensions, not URLs. */
+export function findMediaPaths(v: unknown, path = 'player', out: string[] = []): string[] {
+  if (typeof v === 'string') {
+    const m = /\.(mp4|m3u8|webm|mpd)(\?|$|")/i.exec(v);
+    if (m) out.push(`${path} (.${m[1].toLowerCase()})`);
+  } else if (Array.isArray(v)) {
+    v.slice(0, 10).forEach((x, i) => findMediaPaths(x, `${path}[${i}]`, out));
+  } else if (v && typeof v === 'object') {
+    for (const [k, x] of Object.entries(v as Json)) findMediaPaths(x, `${path}.${k}`, out);
+  }
+  return out;
+}
+
+export function describePlayer(body: unknown): string {
+  const b = body as Json;
+  const data = (b?.data ?? b) as Json;
+  const p = (data?.player ?? {}) as Json;
+  const keys = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v as Json).join(', ') : typeof v);
+  const media = findMediaPaths(p);
+  return (
+    `kind: ${String(data?.kind ?? '-')} | player_type: ${String(p.player_type ?? '-')} | content_type: ${String(p.content_type ?? '-')}` +
+    ` | config: ${keys(p.config)} | content: ${keys(p.content)}` +
+    ` | streamable file: ${media.length ? media.slice(0, 4).join('; ') : 'none found'}`
+  );
 }

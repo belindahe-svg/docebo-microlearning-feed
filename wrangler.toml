@@ -21,8 +21,8 @@ DOCEBO_DOMAIN = "atalentdemo2.docebosaas.com"
 DOCEBO_CHANNEL_ID = ""                 # empty = every channel visible to the learner; or one numeric channel ID
 DOCEBO_OAUTH_CLIENT_ID = "Docebo-Micro-Learning-Feed"            # OAuth2 app selected in the iFrame widget's Advanced Settings
 DOCEBO_OAUTH_REDIRECT_URI = ""         # must match the OAuth2 app config, if Docebo requires it
-# Endpoint templates (unconfirmed in public docs). Confirm with `npm run discover`, then set here.
-DOCEBO_CHANNEL_ITEMS_PATH = "/learn/v1/channels/{channelId}/items"
+# Endpoint templates. Channel list and channel assets confirmed on atalentdemo2 (2026-10-15).
+DOCEBO_CHANNEL_ITEMS_PATH = "/learn/v1/channels/{channelId}/assets"   # confirmed 200 with the learner token
 DOCEBO_CHANNELS_LIST_PATH = "/learn/v1/channels"     # used when DOCEBO_CHANNEL_ID is empty
 DOCEBO_ASSET_VIEW_PATH = ""            # leave empty until a view-tracking endpoint is confirmed
 # Comma-separated origins allowed to frame the app.
