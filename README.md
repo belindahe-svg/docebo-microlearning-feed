@@ -102,7 +102,7 @@ Endpoints come from the instance's own API spec (`/share/v1/swagger`, `/learn/v1
 
 | Feed action | Assets | Courses | Learning plans |
 |---|---|---|---|
-| Like ♥ | App only (Docebo has no "like" for content) | App only | App only |
+| ~~Like ♥~~ | Removed from the card (Rate covers it); the likes table and API remain | | |
 | Rate ★ | `PUT /share/v1/assets/{id}/rating` | `POST /learn/v1/courses/{id}/rating` | n/a |
 | Comment | Docebo asset comments (`/share/v1/comments`) | App | App |
 | Save | Docebo **Add to playlist** picker: learner's playlists, toggle, create new | Same | App only |

@@ -112,7 +112,6 @@
         <a class="cta" href="${esc(it.doceboUrl)}" target="_top">${ctaLabel(it)}</a>
       </div>
       <div class="rail">
-        <button type="button" class="rbtn like" aria-pressed="${e.liked}" aria-label="Like">${ICON.heart}<span>${e.likes}</span></button>
         <button type="button" class="rbtn com" aria-label="Comments">${ICON.chat}<span>${e.comments}</span></button>
         ${canRateKind(it) ? `<button type="button" class="rbtn rate" aria-pressed="${!!it.myRating}" aria-label="Rate in Docebo">${ICON.star}<span>${rateLabel(it)}</span></button>` : ''}
         <button type="button" class="rbtn save" aria-pressed="${e.saved}" aria-label="Save">${ICON.save}<span>${e.saved ? 'Saved' : 'Save'}</span></button>
