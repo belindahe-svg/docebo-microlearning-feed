@@ -179,10 +179,12 @@
     }
   }
 
+  // YouTube rejects embeds that send no Referer (error 153). The page keeps Referrer-Policy: no-referrer;
+  // this frame alone sends the origin (no path or query), after the auth code has left the address bar.
   function startYouTube(card, it) {
     if (card.querySelector('iframe.ytframe')) return;
     const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(it.youtubeId)}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
-    card.insertAdjacentHTML('beforeend', `<iframe class="ytframe" src="${src}" title="${esc(it.title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`);
+    card.insertAdjacentHTML('beforeend', `<iframe class="ytframe" src="${src}" title="${esc(it.title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`);
     card.classList.remove('paused');
     card.classList.add('playing');
     // Feed analytics only: "started" in this app. Docebo's own view record needs "Open in Docebo".
