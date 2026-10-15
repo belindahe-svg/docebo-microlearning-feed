@@ -6,6 +6,10 @@
 
   const $ = (id) => document.getElementById(id);
   const feedEl = $('feed');
+  // Focusing a field inside a sliding panel makes the browser scroll the (clipped) stage to reveal
+  // it, which left the layout shifted and stuck. The stage itself must never scroll.
+  const stageEl = document.querySelector('.stage');
+  stageEl.addEventListener('scroll', () => { if (stageEl.scrollTop || stageEl.scrollLeft) { stageEl.scrollTop = 0; stageEl.scrollLeft = 0; } });
   const statusEl = $('status');
   const toastEl = $('toast');
   const sheet = $('sheet');
@@ -365,7 +369,7 @@
     $('sheetSrc').textContent = '';
     renderComments(sheetList);
     openPanel(sheet);
-    $('cinput').focus();
+    $('cinput').focus({ preventScroll: true });
     try {
       const r = await api(`/api/items/${encodeURIComponent(sheetItem.key)}/comments`);
       sheetList = r.comments;
@@ -406,7 +410,7 @@
     $('stars').innerHTML = [1, 2, 3, 4, 5].map((n) =>
       `<button type="button" role="radio" aria-checked="${rateItem.myRating === n}" data-n="${n}" aria-label="${n} star${n > 1 ? 's' : ''}" class="${n <= (rateItem.myRating || 0) ? 'on' : ''}">${ICON.star}</button>`).join('');
     openPanel($('rateSheet'));
-    $('stars').querySelector('button')?.focus();
+    $('stars').querySelector('button')?.focus({ preventScroll: true });
   }
   $('stars').addEventListener('click', async (e) => {
     const b = e.target.closest('button[data-n]');
@@ -428,18 +432,20 @@
   let shareItem = null;
   const picked = new Set();
   let shareUsers = [];
-  function renderUsers() {
+  function renderUsers(searched) {
     $('ulist').innerHTML = shareUsers.length
       ? shareUsers.map((u) => `<li><label><input type="checkbox" value="${u.id}" ${picked.has(u.id) ? 'checked' : ''}>
           <span class="who">${esc(u.name || u.username)}</span>${u.username && u.name ? `<span class="when">${esc(u.username)}</span>` : ''}</label></li>`).join('')
-      : '<li class="empty">No people found.</li>';
+      : `<li class="empty">${searched ? 'Nobody matches that name.' : 'Type at least 3 letters of a colleague\'s name to find them.'}</li>`;
     $('sendInvite').disabled = !picked.size;
     $('sendInvite').textContent = picked.size ? `Send invite (${picked.size})` : 'Send invite';
   }
   async function loadUsers(q) {
     try {
-      shareUsers = (await api(`/api/items/${encodeURIComponent(shareItem.key)}/invite?q=${encodeURIComponent(q)}`)).users;
-      renderUsers();
+      const found = (await api(`/api/items/${encodeURIComponent(shareItem.key)}/invite?q=${encodeURIComponent(q)}`)).users;
+      // Keep people already ticked visible while searching for more.
+      shareUsers = [...shareUsers.filter((u) => picked.has(u.id) && !found.some((f) => f.id === u.id)), ...found];
+      renderUsers(!!q);
     } catch (err) { $('ulist').innerHTML = `<li class="empty">${esc(err.message)}</li>`; }
   }
   function openShare(i) {
@@ -450,6 +456,7 @@
     $('copyLink').textContent = 'Copy link';
     const invite = shareItem.kind === 'asset';
     $('inviteBox').hidden = !invite;
+    $('shareNote').hidden = invite;
     $('inviteSearch').value = '';
     if (invite) { $('ulist').innerHTML = '<li class="empty">Loading suggestions</li>'; loadUsers(''); }
     openPanel($('shareSheet'));
@@ -671,7 +678,13 @@
     const like = e.target.closest('.like');
     const save = e.target.closest('.save');
     if (like) return void toggleFlag(like, it, 'like');
-    if (save) return void (it.kind === 'asset' || it.kind === 'course' ? openPlaylists(i) : toggleFlag(save, it, 'save'));
+    if (save) {
+      if (it.kind === 'asset' || it.kind === 'course') return void openPlaylists(i);
+      toggleFlag(save, it, 'save');
+      return void toast(it.engagement.saved
+        ? 'Removed from Saved.'
+        : 'Saved in the feed. Docebo playlists only hold videos, files and courses, so learning plans cannot be added to one.');
+    }
     if (e.target.closest('.com')) return void openSheet(i);
     if (e.target.closest('.rate')) return void openRate(i);
     if (e.target.closest('.share')) return void openShare(i);
