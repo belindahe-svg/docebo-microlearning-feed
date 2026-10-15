@@ -131,3 +131,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .ulist .empty{color:var(--muted);border:0;padding:10px 2px}
 .rbtn[aria-pressed="true"].rate svg{color:#f2b33d}
 .rail{gap:13px}
+
+/* Closed panels are hidden outright, not just moved below the stage: inside some hosts (e.g. the
+   Docebo iFrame widget) the area below the stage can be visible, which left closed panels on screen. */
+.sheet{visibility:hidden;pointer-events:none;transition:transform .25s ease,visibility 0s linear .25s}
+.sheet.open{visibility:visible;pointer-events:auto;transition:transform .25s ease,visibility 0s}
+html,body{overflow:hidden}

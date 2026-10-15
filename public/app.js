@@ -359,8 +359,7 @@
     sheetList = [];
     $('sheetSrc').textContent = '';
     renderComments(sheetList);
-    sheet.classList.add('open');
-    sheet.setAttribute('aria-hidden', 'false');
+    openPanel(sheet);
     $('cinput').focus();
     try {
       const r = await api(`/api/items/${encodeURIComponent(sheetItem.key)}/comments`);
@@ -382,7 +381,14 @@
 
   // ---------- rate (Docebo rating) ----------
   let rateItem = null;
-  function openPanel(el) { el.classList.add('open'); el.setAttribute('aria-hidden', 'false'); }
+  // One panel at a time: opening Rate, Share or Comments closes the others.
+  function openPanel(el) {
+    for (const other of document.querySelectorAll('.sheet.open')) {
+      if (other !== el) { other.classList.remove('open'); other.setAttribute('aria-hidden', 'true'); }
+    }
+    el.classList.add('open');
+    el.setAttribute('aria-hidden', 'false');
+  }
   function closePanel(el) { el.classList.remove('open'); el.setAttribute('aria-hidden', 'true'); feedEl.focus({ preventScroll: true }); }
 
   function openRate(i) {
