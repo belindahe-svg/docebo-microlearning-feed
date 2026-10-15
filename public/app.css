@@ -161,3 +161,5 @@ html,body{overflow:hidden}
 .progress i{display:block;height:100%;width:0;background:var(--brand);transition:width .2s}
 .progress[hidden]{display:none}
 .postform .hint{text-align:left;margin:0}
+.formerr{margin:0;padding:8px 12px;border-radius:10px;background:#fde8ec;color:#8a1630;font-size:13px}
+.formerr[hidden]{display:none}

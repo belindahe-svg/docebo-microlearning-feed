@@ -88,7 +88,7 @@
     return 'Start in Docebo';
   }
 
-  const canRateKind = (it) => (it.kind === 'asset' || it.kind === 'course') && it.canRate !== false;
+  const canRateKind = (it) => it.kind === 'asset' || it.kind === 'course';
   const rateLabel = (it) => (it.myRating ? `${it.myRating}★` : 'Rate');
 
   function cardHtml(it, i) {
@@ -171,7 +171,7 @@
         if (pct >= step && !sent.has(step)) {
           sent.add(step);
           api(`/api/items/${encodeURIComponent(it.key)}/progress`, { method: 'POST', body: JSON.stringify({ percent: step }) })
-            .catch(() => {});
+            .then((r) => { if (r.trackedInDocebo) refreshRating(it); }).catch(() => {});
         }
       }
     });
@@ -238,8 +238,7 @@
     const comSpan = card.querySelector('.com span');
     if (comSpan) comSpan.textContent = it.engagement.comments;
     const rateBtn = card.querySelector('.rate');
-    if (rateBtn && !canRateKind(it)) rateBtn.remove();
-    else if (rateBtn) { rateBtn.querySelector('span').textContent = rateLabel(it); rateBtn.setAttribute('aria-pressed', String(!!it.myRating)); }
+    if (rateBtn) { rateBtn.querySelector('span').textContent = rateLabel(it); rateBtn.setAttribute('aria-pressed', String(!!it.myRating)); }
     const chip = card.querySelector('.chips .chip');
     if (chip) chip.textContent = kindLabel(it);
     const art = card.querySelector('.art');
@@ -263,7 +262,19 @@
     card.classList.remove('paused');
     card.classList.add('playing');
     // Feed analytics only: "started" in this app. Docebo's own view record needs "Open in Docebo".
-    api(`/api/items/${encodeURIComponent(it.key)}/progress`, { method: 'POST', body: JSON.stringify({ percent: 1 }) }).catch(() => {});
+    api(`/api/items/${encodeURIComponent(it.key)}/progress`, { method: 'POST', body: JSON.stringify({ percent: 1 }) })
+      .then((r) => { if (r.trackedInDocebo) refreshRating(it); }).catch(() => {});
+  }
+
+  // Watching can make an item rateable in Docebo, so re-read the learner's rating permission.
+  function refreshRating(it) {
+    if (it.kind !== 'asset') return;
+    api(`/api/assets/${encodeURIComponent(it.id)}/media`).then((m) => {
+      if (m.canRate !== undefined) it.canRate = m.canRate;
+      if (m.myRating !== undefined) it.myRating = m.myRating || 0;
+      const btn = cards[items.indexOf(it)]?.querySelector('.rate span');
+      if (btn) btn.textContent = rateLabel(it);
+    }).catch(() => {});
   }
 
   function stopYouTube(card) {
@@ -387,7 +398,11 @@
   function closePanel(el) { el.classList.remove('open'); el.setAttribute('aria-hidden', 'true'); feedEl.focus({ preventScroll: true }); }
 
   function openRate(i) {
-    rateItem = items[i];
+    const it = items[i];
+    // Docebo keeps one rating per person and only allows rating once the item has been opened.
+    if (it.myRating && it.canRate === false) return void toast(`You rated this ${it.myRating}★ in Docebo. Docebo keeps one rating per person.`);
+    if (it.canRate === false) return void toast('Docebo lets you rate this once you have watched or opened it.');
+    rateItem = it;
     $('rateTitle').textContent = `Rate "${rateItem.title}"`;
     $('stars').innerHTML = [1, 2, 3, 4, 5].map((n) =>
       `<button type="button" role="radio" aria-checked="${rateItem.myRating === n}" data-n="${n}" aria-label="${n} star${n > 1 ? 's' : ''}" class="${n <= (rateItem.myRating || 0) ? 'on' : ''}">${ICON.star}</button>`).join('');
@@ -401,6 +416,7 @@
     try {
       const r = await api(`/api/items/${encodeURIComponent(rateItem.key)}/rating`, { method: 'POST', body: JSON.stringify({ rating: n }) });
       rateItem.myRating = r.rating || n;
+      rateItem.canRate = r.canRate;
       const card = cards[items.indexOf(rateItem)];
       const btn = card?.querySelector('.rate');
       if (btn) { btn.querySelector('span').textContent = rateLabel(rateItem); btn.setAttribute('aria-pressed', 'true'); }
@@ -549,6 +565,7 @@
     $('linkPrev').hidden = true;
     linkThumb = '';
     $('postProgress').hidden = true;
+    $('postError').hidden = true;
     $('postSubmit').disabled = false;
     setTab('upload');
     openPanel($('postSheet'));
@@ -613,6 +630,7 @@
     const description = $('postDesc').value.trim();
     const channels = [...$('postChannels').querySelectorAll('input:checked')].map((x) => Number(x.value));
     if (!title) return void toast('Add a title.');
+    $('postError').hidden = true;
     $('postSubmit').disabled = true;
     try {
       if (postTab === 'link') {
@@ -635,7 +653,11 @@
       toast(postTab === 'link'
         ? 'Shared to Docebo. It appears in the channels once published (some channels need expert approval).'
         : 'Uploaded to Docebo. Videos take a few minutes to process, and some channels need expert approval.');
-    } catch (err) { toast(err.message); }
+    } catch (err) {
+      $('postError').hidden = false;
+      $('postError').textContent = err.message;
+      $('postProgress').hidden = true;
+    }
     $('postSubmit').disabled = false;
     $('postSubmit').textContent = 'Publish';
   });

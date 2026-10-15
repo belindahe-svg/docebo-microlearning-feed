@@ -325,10 +325,21 @@ export async function uploadToDocebo(env: Env, s: Session, filename: string, mim
   const url = String(d.url ?? '');
   const stored = String(d.fileName ?? d.filename_hashed ?? '');
   if (!url || !stored) throw new DoceboError(502, 'Docebo did not return an upload URL');
+  // S3 presigned PUTs need a known Content-Length (no chunked uploads), so stream through a
+  // FixedLengthStream when the size is known, otherwise buffer the file.
+  const len = Number(length);
+  let payload: BodyInit;
+  if (Number.isFinite(len) && len > 0) {
+    const { readable, writable } = new FixedLengthStream(len);
+    body.pipeTo(writable).catch(() => {});
+    payload = readable;
+  } else {
+    payload = await new Response(body).arrayBuffer();
+  }
   const res = await fetch(url.startsWith('//') ? `https:${url}` : url, {
     method: 'PUT',
-    headers: { 'Content-Type': String(d.content_type ?? mime), ...(length ? { 'Content-Length': length } : {}) },
-    body,
+    headers: { 'Content-Type': String(d.content_type ?? mime) },
+    body: payload,
   });
   if (!res.ok) {
     const text = (await res.text().catch(() => '')).replace(/\s+/g, ' ');
