@@ -30,7 +30,7 @@ ALLOWED_FRAME_ANCESTORS = "https://atalentdemo2.docebosaas.com"
 SESSION_TTL_SECONDS = "3600"
 # Discovery mode: Docebo usernames or user IDs (comma-separated) who see endpoint checks instead of
 # the feed. Read-only. Clear this once the endpoints are confirmed.
-DISCOVERY_USERS = "learner"
+DISCOVERY_USERS = ""
 DISCOVERY_ASSET_ID = "75"            # "Docebo Personality", an uploaded video
 
 # Secrets (set with `npx wrangler secret put NAME`, never commit):

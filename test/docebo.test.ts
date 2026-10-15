@@ -107,3 +107,15 @@ describe('uploaded video assets', () => {
     expect(assetMediaFrom({ data: { player: { player_type: 'embeded', content: { sources: [{ url: 'https://youtu.be/dQw4w9WgXcQ' }] } } } }).videoUrl).toBeUndefined();
   });
 });
+
+describe('confirmed flowplayer upload shape (asset #75)', () => {
+  it('prefers the MP4 and reads thumbnails (plural)', () => {
+    const m = assetMediaFrom({ data: { player: { player_type: 'flowplayer', content_type: 1, content: {
+      name_original: 'p.mp4', name_converted: 'p.mp4',
+      sources: [{ src: 'https://cdn1.dcbstatic.com/v/p.m3u8' }, { src: 'https://cdn1.dcbstatic.com/v/p.mp4' }],
+      thumbnails: { cover: 'https://cdn1.dcbstatic.com/t/c.jpg' } } } } });
+    expect(m.videoUrl).toBe('https://cdn1.dcbstatic.com/v/p.mp4');
+    expect(m.thumbnailUrl).toBe('https://cdn1.dcbstatic.com/t/c.jpg');
+    expect(m.subtype).toBe('Video');
+  });
+});

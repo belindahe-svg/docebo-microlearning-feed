@@ -229,7 +229,7 @@ export function assetMediaFrom(body: unknown): AssetMedia {
   const sources = Array.isArray(c.sources) ? (c.sources as Json[]) : [];
   const urls = [...sources.map((s) => str(s?.url ?? s?.src)), str(c.name_original)].filter(Boolean) as string[];
   const youtubeId = urls.map(youtubeIdFrom).find(Boolean);
-  const thumb = (c.thumbnail ?? {}) as Json;
+  const thumb = (c.thumbnail ?? c.thumbnails ?? {}) as Json; // YouTube assets: thumbnail; uploads: thumbnails
   const thumbnailUrl =
     str(thumb.cover) ?? str(thumb.rectangular) ?? str(thumb.original) ??
     (typeof d?.thumbnail === 'string' ? str(d.thumbnail) : str((d?.thumbnail as Json)?.url)) ??
@@ -241,11 +241,14 @@ export function assetMediaFrom(body: unknown): AssetMedia {
   const VIDEO_EXT = /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i;
   const isLink = playerType.includes('link');
   const nameLooksVideo = VIDEO_EXT.test(String(c.name_original ?? '')) || VIDEO_EXT.test(String(c.name_converted ?? ''));
-  const direct = !youtubeId && !isLink
-    ? [...sources.map((s) => str(s?.url ?? s?.src ?? s?.file)), str(c.name_converted)]
+  // Uploads (flowplayer) list an HLS stream and an MP4 on cdn1.dcbstatic.com. Prefer the MP4: it plays
+  // everywhere without hls.js and is fine for short clips.
+  const candidates = !youtubeId && !isLink
+    ? [...sources.map((s) => str(s?.src ?? s?.url ?? s?.file)), str(c.name_converted)]
         .filter((u): u is string => !!u && /^https?:\/\//i.test(u) && !/youtu\.?be|vimeo\.com|wistia/i.test(u))
-        .find((u) => VIDEO_EXT.test(u) || nameLooksVideo || /video|media/.test(playerType))
-    : undefined;
+        .filter((u) => VIDEO_EXT.test(u) || nameLooksVideo || /video|media|flowplayer/.test(playerType))
+    : [];
+  const direct = candidates.find((u) => /\.(mp4|m4v|webm)(\?|#|$)/i.test(u)) ?? candidates[0];
   const subtype = youtubeId || direct || /vimeo|wistia|\.mp4|\.m3u8/i.test(urls.join(' '))
     ? 'Video'
     : playerType.includes('link')
