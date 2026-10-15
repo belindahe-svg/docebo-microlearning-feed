@@ -69,7 +69,7 @@ export function normalizeItem(o: Json, domain: string): FeedItem | null {
     subtype,
     title,
     description: str(pick(o, 'short_description', 'description')),
-    thumbnailUrl: str(pick(o, 'image_url', 'thumbnail', 'thumbnail_url', 'image', 'cover')),
+    thumbnailUrl: absUrl(pick(o, 'image_url', 'thumbnail', 'thumbnail_url', 'image', 'cover')),
     videoUrl,
     doceboUrl,
     status: str(pick(o, 'enrollment_status', 'user_status', 'status_label')),
@@ -195,6 +195,13 @@ export async function recordAssetView(env: Env, token: string | null, assetId: s
 }
 
 /** What the feed needs from an asset's detail record to play or preview it. */
+/** Docebo writes CDN links protocol-relative ("//cdn1.dcbstatic.com/..."); make them absolute https. */
+export function absUrl(u: unknown): string | undefined {
+  const v = str(u);
+  if (!v) return undefined;
+  return v.startsWith('//') ? `https:${v}` : v;
+}
+
 export interface AssetMedia {
   youtubeId?: string;
   videoUrl?: string;      // direct file or HLS stream for uploaded videos
@@ -227,12 +234,12 @@ export function assetMediaFrom(body: unknown): AssetMedia {
   const p = (d?.player ?? {}) as Json;
   const c = (p.content ?? {}) as Json;
   const sources = Array.isArray(c.sources) ? (c.sources as Json[]) : [];
-  const urls = [...sources.map((s) => str(s?.url ?? s?.src)), str(c.name_original)].filter(Boolean) as string[];
+  const urls = [...sources.map((s) => absUrl(s?.url ?? s?.src)), absUrl(c.name_original)].filter(Boolean) as string[];
   const youtubeId = urls.map(youtubeIdFrom).find(Boolean);
   const thumb = (c.thumbnail ?? c.thumbnails ?? {}) as Json; // YouTube assets: thumbnail; uploads: thumbnails
   const thumbnailUrl =
-    str(thumb.cover) ?? str(thumb.rectangular) ?? str(thumb.original) ??
-    (typeof d?.thumbnail === 'string' ? str(d.thumbnail) : str((d?.thumbnail as Json)?.url)) ??
+    absUrl(thumb.cover) ?? absUrl(thumb.rectangular) ?? absUrl(thumb.original) ??
+    (typeof d?.thumbnail === 'string' ? absUrl(d.thumbnail) : absUrl((d?.thumbnail as Json)?.url)) ??
     (youtubeId ? `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg` : undefined);
   const playerType = String(p.player_type ?? '').toLowerCase();
   const config = (p.config ?? {}) as Json;
@@ -244,7 +251,7 @@ export function assetMediaFrom(body: unknown): AssetMedia {
   // Uploads (flowplayer) list an HLS stream and an MP4 on cdn1.dcbstatic.com. Prefer the MP4: it plays
   // everywhere without hls.js and is fine for short clips.
   const candidates = !youtubeId && !isLink
-    ? [...sources.map((s) => str(s?.src ?? s?.url ?? s?.file)), str(c.name_converted)]
+    ? [...sources.map((s) => absUrl(s?.src ?? s?.url ?? s?.file)), absUrl(c.name_converted)]
         .filter((u): u is string => !!u && /^https?:\/\//i.test(u) && !/youtu\.?be|vimeo\.com|wistia/i.test(u))
         .filter((u) => VIDEO_EXT.test(u) || nameLooksVideo || /video|media|flowplayer/.test(playerType))
     : [];
@@ -261,7 +268,7 @@ export function assetMediaFrom(body: unknown): AssetMedia {
 
 // Per-isolate cache: asset media rarely changes, and this keeps repeat scrolls off the Docebo API.
 const mediaCache = new Map<string, { at: number; v: AssetMedia }>();
-const MEDIA_TTL_MS = 30 * 60 * 1000;
+const MEDIA_TTL_MS = 20 * 60 * 1000; // CDN paths carry an expiry timestamp; stay well inside it
 
 export async function getAssetMedia(env: Env, token: string | null, assetId: string): Promise<AssetMedia> {
   if (env.DOCEBO_MODE !== 'live' || !token) return {};

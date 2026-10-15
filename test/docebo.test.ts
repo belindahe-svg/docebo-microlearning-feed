@@ -119,3 +119,16 @@ describe('confirmed flowplayer upload shape (asset #75)', () => {
     expect(m.subtype).toBe('Video');
   });
 });
+
+describe('protocol-relative Docebo CDN links (real asset #75 shape)', () => {
+  it('turns //cdn1.dcbstatic.com links into https and picks the MP4', () => {
+    const m = assetMediaFrom({ data: { player: { player_type: 'flowplayer', content: {
+      sources: [
+        { src: '//cdn1.dcbstatic.com/files/a/t/x/1792062000/k/app7020/video/h/h.m3u8', type: 'application/x-mpegurl' },
+        { src: '//cdn1.dcbstatic.com/files/a/t/x/1792062000/k/app7020/video/h/h.mp4', type: 'video/mp4' },
+      ],
+      thumbnails: { cover: '//cdn1.dcbstatic.com/t/c.jpg' } } } } });
+    expect(m.videoUrl).toBe('https://cdn1.dcbstatic.com/files/a/t/x/1792062000/k/app7020/video/h/h.mp4');
+    expect(m.thumbnailUrl).toBe('https://cdn1.dcbstatic.com/t/c.jpg');
+  });
+});
