@@ -100,6 +100,7 @@ export function channelIdOf(o: Json): string | undefined {
 
 export interface VisibleChannel {
   id: string;
+  name: string;
   /** Preview of the channel's items that Docebo embeds in the channel list (first ~10). */
   preview: Json[];
 }
@@ -114,7 +115,7 @@ export async function listVisibleChannels(env: Env, token: string): Promise<Visi
     for (const row of extractRows(body)) {
       const id = channelIdOf(row);
       if (id && !out.some((c) => c.id === id)) {
-        out.push({ id, preview: Array.isArray(row.sub_items) ? (row.sub_items as Json[]) : [] });
+        out.push({ id, name: str(pick(row, 'name', 'title')) ?? `Channel ${id}`, preview: Array.isArray(row.sub_items) ? (row.sub_items as Json[]) : [] });
       }
     }
     const data = (body?.data ?? {}) as Json;
@@ -127,12 +128,17 @@ export async function listVisibleChannelIds(env: Env, token: string): Promise<st
   return (await listVisibleChannels(env, token)).map((c) => c.id);
 }
 
-/** Merge item lists, keeping the first occurrence of each item key. */
+/** Merge item lists, keeping the first occurrence of each item key and the union of its channel names. */
 export function dedupeItems(lists: FeedItem[][]): FeedItem[] {
-  const seen = new Set<string>();
-  const out: FeedItem[] = [];
-  for (const list of lists) for (const it of list) if (!seen.has(it.key)) { seen.add(it.key); out.push(it); }
-  return out;
+  const byKey = new Map<string, FeedItem>();
+  for (const list of lists) {
+    for (const it of list) {
+      const prev = byKey.get(it.key);
+      if (!prev) byKey.set(it.key, { ...it, channels: [...(it.channels ?? [])] });
+      else for (const c of it.channels ?? []) if (!prev.channels!.includes(c)) prev.channels!.push(c);
+    }
+  }
+  return [...byKey.values()];
 }
 
 /**
@@ -153,7 +159,7 @@ export async function getChannelItems(env: Env, token: string | null): Promise<F
       ),
     ),
   );
-  return dedupeItems(lists);
+  return dedupeItems(lists.map((list, i) => list.map((it) => ({ ...it, channels: [channels[i].name] }))));
 }
 
 async function getItemsForChannel(env: Env, token: string, channelId: string): Promise<FeedItem[]> {

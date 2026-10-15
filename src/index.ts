@@ -90,8 +90,12 @@ async function handleFeed(env: Env, s: Session): Promise<Response> {
   }
   const keys = items.map((i) => i.key);
   const [eng, media] = await Promise.all([engagementFor(env, s.user_id, keys), mediaOverrides(env, keys)]);
+  // Channel chips: each channel that contributed at least one item, in Docebo's order.
+  const channels: string[] = [];
+  for (const i of items) for (const c of i.channels ?? []) if (!channels.includes(c)) channels.push(c);
   return json({
     mode: env.DOCEBO_MODE,
+    channels,
     items: items.map((i) => ({
       ...i,
       videoUrl: media[i.key]?.video_url ?? i.videoUrl,

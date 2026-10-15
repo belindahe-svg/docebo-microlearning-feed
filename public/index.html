@@ -10,6 +10,18 @@
 </head>
 <body>
   <main class="stage">
+    <header class="topbar" id="topbar" hidden>
+      <div class="toprow">
+        <div class="filters" id="filters" role="toolbar" aria-label="Filter the feed"></div>
+        <button type="button" class="searchbtn" id="searchBtn" aria-label="Search the feed" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        </button>
+      </div>
+      <form class="searchrow" id="searchRow" role="search" hidden>
+        <input id="q" type="search" placeholder="Search titles and channels" aria-label="Search the feed" autocomplete="off" enterkeyhint="search">
+        <button type="button" id="searchClose">Cancel</button>
+      </form>
+    </header>
     <div class="feed" id="feed" tabindex="0" aria-label="Learning feed. Use the arrow keys to move between items."></div>
 
     <div class="status" id="status" role="status">Loading your feed</div>

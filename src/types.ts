@@ -33,6 +33,7 @@ export interface FeedItem {
   doceboUrl: string;      // deep link that opens the item in Docebo's own player
   status?: string;        // learner's enrolment status for courses, when Docebo returns it
   rating?: number;
+  channels?: string[];    // names of the learner's channels this item appears in (all-channels mode)
 }
 
 export interface Engagement {

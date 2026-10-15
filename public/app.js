@@ -13,8 +13,12 @@
 
   let token = null;
   let me = null;
-  let items = [];
+  let all = [];          // every card the learner can see
+  let items = [];        // the current filtered view (cards are rendered from this)
+  let channelNames = [];
+  const filter = { type: 'all', channel: '', q: '' };
   let cards = [];
+  let io = null;
   let cur = -1;
   let muted = true;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -91,8 +95,10 @@
          <button type="button" class="mute" aria-label="Unmute">Sound off</button>`
       : `<div class="art" style="background:linear-gradient(160deg,${c1},${c2})">${it.thumbnailUrl ? `<img alt="" src="${esc(it.thumbnailUrl)}">` : ''}</div>
          <div class="big">${esc(it.title)}</div>`;
-    return `<article class="card" data-i="${i}" aria-label="${esc(it.title)}">
+    const yt = it.youtubeId && !it.videoUrl;
+    return `<article class="card${yt ? ' yt paused' : ''}" data-i="${i}" data-key="${esc(it.key)}" aria-label="${esc(it.title)}">
       ${visual}
+      ${yt ? `<div class="playstate">${ICON.play}</div>` : ''}
       <div class="shade"></div>
       <div class="meta">
         <div class="chips"><span class="chip">${esc(kindLabel(it))}</span>${statusChip(it.status)}${it.rating ? `<span class="chip">★ ${esc(it.rating)}</span>` : ''}</div>
@@ -116,7 +122,8 @@
       const v = card.querySelector('video');
       if (v) wireVideo(v, card, items[i]);
     });
-    const io = new IntersectionObserver((entries) => {
+    if (io) io.disconnect();
+    io = new IntersectionObserver((entries) => {
       for (const e of entries) if (e.isIntersecting && e.intersectionRatio >= 0.6) activate(Number(e.target.dataset.i));
     }, { root: feedEl, threshold: [0.6] });
     cards.forEach((c) => io.observe(c));
@@ -151,29 +158,38 @@
 
   // ---------- asset media (lazy) ----------
   // Asset cards arrive without thumbnails or video info; fetch them as cards come near the viewport.
-  const mediaReq = new Map();
-  function enrich(i) {
-    const it = items[i];
-    if (!it || it.kind !== 'asset' || mediaReq.has(i)) return;
-    mediaReq.set(i, api(`/api/assets/${encodeURIComponent(it.id)}/media`)
-      .then((m) => applyMedia(i, m))
-      .catch(() => {}));
+  const mediaReq = new Map(); // item key -> promise
+  function enrichItem(it) {
+    if (!it || it.kind !== 'asset') return Promise.resolve();
+    if (!mediaReq.has(it.key)) {
+      mediaReq.set(it.key, api(`/api/assets/${encodeURIComponent(it.id)}/media`)
+        .then((m) => applyMedia(it, m))
+        .catch(() => {}));
+    }
+    return mediaReq.get(it.key);
+  }
+  function enrich(i) { enrichItem(items[i]); }
+
+  // The Videos filter needs every asset's type, so look them all up (a few at a time).
+  async function enrichAllAssets() {
+    const todo = all.filter((it) => it.kind === 'asset' && !mediaReq.has(it.key));
+    for (let k = 0; k < todo.length; k += 6) await Promise.all(todo.slice(k, k + 6).map(enrichItem));
+    await Promise.all(all.filter((it) => it.kind === 'asset').map((it) => mediaReq.get(it.key)));
   }
 
-  function applyMedia(i, m) {
-    const it = items[i];
-    const card = cards[i];
-    if (!it || !card) return;
+  function applyMedia(it, m) {
     if (m.subtype) it.subtype = m.subtype;
     if (m.thumbnailUrl && !it.thumbnailUrl) it.thumbnailUrl = m.thumbnailUrl;
+    if (m.youtubeId && !it.videoUrl) it.youtubeId = m.youtubeId;
+    const card = cards[items.indexOf(it)];
+    if (!card) return;
     const chip = card.querySelector('.chips .chip');
     if (chip) chip.textContent = kindLabel(it);
     const art = card.querySelector('.art');
     if (art && it.thumbnailUrl && !art.querySelector('img')) {
       art.insertAdjacentHTML('afterbegin', `<img alt="" src="${esc(it.thumbnailUrl)}">`);
     }
-    if (m.youtubeId && !it.videoUrl) {
-      it.youtubeId = m.youtubeId;
+    if (it.youtubeId && !it.videoUrl && !card.classList.contains('yt')) {
       card.classList.add('yt', 'paused');
       if (!card.querySelector('.playstate')) card.insertAdjacentHTML('beforeend', `<div class="playstate">${ICON.play}</div>`);
     }
@@ -315,6 +331,7 @@
     if (e.key === 'ArrowDown') { e.preventDefault(); go(1); }
     if (e.key === 'ArrowUp') { e.preventDefault(); go(-1); }
     if (e.key === ' ' && cards[cur]) { e.preventDefault(); togglePlay(cards[cur]); }
+    if (e.key === '/' && !$('topbar').hidden) { e.preventDefault(); openSearch(); }
   });
   $('closeSheet').addEventListener('click', closeSheet);
   sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
@@ -386,13 +403,112 @@
     });
   }
 
+  // ---------- filters and search ----------
+  const filtersEl = $('filters');
+  const TYPES = [['all', 'All'], ['videos', 'Videos'], ['courses', 'Courses'], ['saved', 'Saved']];
+
+  function isVideo(it) { return !!(it.videoUrl || it.youtubeId || /video/i.test(it.subtype || '')); }
+
+  function matches(it) {
+    if (filter.type === 'videos' && !isVideo(it)) return false;
+    if (filter.type === 'courses' && it.kind !== 'course' && it.kind !== 'learning_plan') return false;
+    if (filter.type === 'saved' && !it.engagement?.saved) return false;
+    if (filter.channel && !(it.channels || []).includes(filter.channel)) return false;
+    if (filter.q) {
+      const hay = `${it.title} ${it.description || ''} ${(it.channels || []).join(' ')} ${it.subtype || ''}`.toLowerCase();
+      if (!filter.q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w))) return false;
+    }
+    return true;
+  }
+
+  function renderChips() {
+    const typeChips = TYPES.map(([k, label]) =>
+      `<button type="button" class="fchip" data-type="${k}" aria-pressed="${filter.type === k && (k !== 'all' || !filter.channel)}">${label}</button>`);
+    const chanChips = channelNames.map((c) =>
+      `<button type="button" class="fchip chan" data-channel="${esc(c)}" aria-pressed="${filter.channel === c}">${esc(c)}</button>`);
+    filtersEl.innerHTML = typeChips.join('') + (chanChips.length ? '<span class="fsep" aria-hidden="true"></span>' + chanChips.join('') : '');
+  }
+
+  function emptyMessage() {
+    if (filter.q) return `Nothing matches "${filter.q}".`;
+    if (filter.type === 'saved') return 'Nothing saved yet. Tap Save on any card to keep it here.';
+    if (filter.type === 'videos') return 'No videos here yet.';
+    return 'Nothing here yet.';
+  }
+
+  function applyFilter() {
+    if (cur >= 0 && cards[cur]) {
+      cards[cur].querySelector('video')?.pause();
+      stopYouTube(cards[cur]);
+    }
+    cur = -1;
+    items = all.filter(matches);
+    renderChips();
+    feedEl.scrollTop = 0;
+    if (!items.length) {
+      if (io) io.disconnect();
+      feedEl.innerHTML = '';
+      cards = [];
+      statusEl.hidden = false;
+      statusEl.textContent = emptyMessage();
+      return;
+    }
+    statusEl.hidden = true;
+    render();
+  }
+
+  filtersEl.addEventListener('click', async (e) => {
+    const b = e.target.closest('.fchip');
+    if (!b) return;
+    if (b.dataset.channel !== undefined) {
+      filter.channel = filter.channel === b.dataset.channel ? '' : b.dataset.channel;
+    } else if (b.dataset.type === 'all') {
+      filter.type = 'all';
+      filter.channel = '';
+    } else {
+      filter.type = filter.type === b.dataset.type ? 'all' : b.dataset.type;
+    }
+    if (filter.type === 'videos' && all.some((it) => it.kind === 'asset' && !mediaReq.has(it.key))) {
+      feedEl.innerHTML = '';
+      statusEl.hidden = false;
+      statusEl.textContent = 'Finding videos';
+      await enrichAllAssets();
+    }
+    applyFilter();
+    b.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  });
+
+  const searchRow = $('searchRow');
+  const qEl = $('q');
+  function openSearch() {
+    searchRow.hidden = false;
+    $('searchBtn').setAttribute('aria-expanded', 'true');
+    qEl.focus();
+  }
+  function closeSearch() {
+    searchRow.hidden = true;
+    $('searchBtn').setAttribute('aria-expanded', 'false');
+    if (filter.q) { filter.q = ''; qEl.value = ''; applyFilter(); }
+    feedEl.focus({ preventScroll: true });
+  }
+  $('searchBtn').addEventListener('click', () => (searchRow.hidden ? openSearch() : closeSearch()));
+  $('searchClose').addEventListener('click', closeSearch);
+  searchRow.addEventListener('submit', (e) => { e.preventDefault(); qEl.blur(); });
+  qEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSearch(); });
+  let qTimer;
+  qEl.addEventListener('input', () => {
+    clearTimeout(qTimer);
+    qTimer = setTimeout(() => { filter.q = qEl.value.trim(); applyFilter(); }, 150);
+  });
+
   // ---------- boot ----------
   async function loadFeed() {
     const feed = await api('/api/feed');
-    items = feed.items;
-    if (!items.length) { statusEl.textContent = 'No items in your channels yet.'; return; }
-    statusEl.hidden = true;
-    render();
+    all = feed.items;
+    channelNames = feed.channels || [];
+    if (!all.length) { statusEl.textContent = 'No items in your channels yet.'; return; }
+    $('topbar').hidden = false;
+    applyFilter();
     feedEl.focus({ preventScroll: true });
   }
 
