@@ -28,7 +28,7 @@
 
     <section class="sheet" id="sheet" aria-label="Comments" aria-hidden="true">
       <header>
-        <b id="sheetTitle">Comments</b>
+        <b id="sheetTitle">Comments</b><span class="src" id="sheetSrc"></span>
         <button type="button" id="closeSheet" aria-label="Close comments">×</button>
       </header>
       <ul class="clist" id="clist"></ul>
@@ -36,6 +36,32 @@
         <input id="cinput" maxlength="1000" placeholder="Add a comment" autocomplete="off" aria-label="Comment">
         <button type="submit">Post</button>
       </form>
+    </section>
+
+    <section class="sheet small" id="rateSheet" aria-label="Rate" aria-hidden="true">
+      <header>
+        <b id="rateTitle">Rate this</b>
+        <button type="button" class="closeX" data-close="rateSheet" aria-label="Close rating">×</button>
+      </header>
+      <div class="stars" id="stars" role="radiogroup" aria-label="Your rating"></div>
+      <p class="hint">Your rating is saved in Docebo.</p>
+    </section>
+
+    <section class="sheet" id="shareSheet" aria-label="Share" aria-hidden="true">
+      <header>
+        <b>Share</b>
+        <button type="button" class="closeX" data-close="shareSheet" aria-label="Close share">×</button>
+      </header>
+      <div class="sharebody">
+        <button type="button" class="copylink" id="copyLink">Copy link</button>
+        <input class="linkbox" id="linkBox" readonly aria-label="Link to this item" hidden>
+        <div id="inviteBox" hidden>
+          <p class="hint">Invite colleagues to watch. Docebo sends them the invitation.</p>
+          <input id="inviteSearch" type="search" placeholder="Search people (3+ letters)" autocomplete="off" aria-label="Search people">
+          <ul class="ulist" id="ulist"></ul>
+          <button type="button" class="sendinv" id="sendInvite" disabled>Send invite</button>
+        </div>
+      </div>
     </section>
 
     <div class="toast" id="toast" role="alert" hidden></div>

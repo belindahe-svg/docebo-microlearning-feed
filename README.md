@@ -89,12 +89,25 @@ Everything below happens in the browser. Cloudflare builds and deploys from this
 |---|---|---|
 | 1 | ~~Endpoint for a Channel's items~~ Confirmed: `GET /learn/v1/channels/{id}/assets` (learner token). Rows: id, type_id, title, content_type, image_url, uri, rating, duration. `/learn/v1/channels` also embeds ~10 preview items per channel in `sub_items`. Note: `/share/v1/assets?channel_id=` ignores the filter | `DOCEBO_CHANNEL_ITEMS_PATH`, `normalizeItem` |
 | 2 | ~~Streamable video URL?~~ On atalentdemo2, video assets are YouTube embeds (`player.content.sources[0].url`), so the feed plays them with YouTube's embedded player via `GET /api/assets/{id}/media`. Uploaded MP4 assets not yet checked; media overrides cover them | Media overrides vs direct streaming |
-| 3 | Can an asset view or completion be recorded via API? | `DOCEBO_ASSET_VIEW_PATH` |
+| 3 | ~~Asset view via API?~~ Yes: `PUT /share/v1/assets/{id}/track`, sent on first play | `src/social.ts` |
 | 4 | Do channel items include the learner's enrolment status for courses? | Status chips |
 | 5 | ~~iFrame parameter names~~ Confirmed: `user_id`, `username`, `auth_code`, `hash` | `readIframeParams` |
 | 6 | Does Docebo require `redirect_uri` on the auth-code exchange? | `DOCEBO_OAUTH_REDIRECT_URI` |
 | 7 | The iFrame widget is documented as **desktop only**. Mobile and Go.Learn need a different entry point (e.g. an external link page with SSO) | Mobile rollout |
 | 8 | Does the iframe sandbox allow `target="_top"` links, so "Open in Docebo" navigates the main page? | CTA behaviour |
+
+## Docebo-synced social actions
+
+Endpoints come from the instance's own API spec (`/share/v1/swagger`, `/learn/v1/swagger`) and run with the learner's token.
+
+| Feed action | Assets | Courses | Learning plans |
+|---|---|---|---|
+| Like ♥ | App only (Docebo has no "like" for content) | App only | App only |
+| Rate ★ | `PUT /share/v1/assets/{id}/rating` | `POST /learn/v1/courses/{id}/rating` | n/a |
+| Comment | Docebo asset comments (`/share/v1/comments`) | App | App |
+| Save | App + learner's private Docebo playlist "Saved from Feed" | App + playlist | App only |
+| Share | Invite to watch (`/share/v1/assets/{id}/invitations`) + copy link | Copy link | Copy link |
+| Watch | `PUT /share/v1/assets/{id}/track` on first play | n/a | n/a |
 
 ## Security notes
 

@@ -1,6 +1,19 @@
 import type { Env, Session } from './types';
 import { createSession, exchangeAuthCode, getSession, readIframeParams, timingSafeEqual, verifyIframeHash } from './auth';
-import { getAssetMedia, getChannelItems, recordAssetView } from './docebo';
+import { getAssetMedia, getChannelItems } from './docebo';
+import {
+  DoceboError,
+  addAssetComment,
+  countAssetComments,
+  deleteDoceboComment,
+  getAssetRating,
+  inviteCandidates,
+  listAssetComments,
+  rateItem,
+  sendInvites,
+  syncSaveToPlaylist,
+  trackAssetView,
+} from './social';
 import { isDiscoveryUser, runDiscovery } from './discover';
 import {
   ITEM_KEY_RE,
@@ -15,7 +28,6 @@ import {
   setMediaOverride,
 } from './db';
 
-const COMPLETE_AT = 90; // percent watched that counts as a completed view
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -24,6 +36,12 @@ function json(data: unknown, status = 200): Response {
   });
 }
 const err = (status: number, message: string) => json({ error: message }, status);
+
+/** Pass Docebo's own refusal (e.g. permissions, comments disabled) through to the learner. */
+function doceboErr(e: unknown): Response {
+  if (e instanceof DoceboError) return err(e.status === 401 ? 401 : e.status >= 500 ? 502 : e.status, e.message);
+  return err(502, (e as Error).message);
+}
 
 /** Allow framing only by the configured Docebo origins. */
 function withFrameHeaders(res: Response, env: Env): Response {
@@ -146,46 +164,122 @@ async function route(req: Request, env: Env): Promise<Response> {
   const assetMedia = /^\/api\/assets\/(\d+)\/media$/.exec(path);
   if (assetMedia && req.method === 'GET') {
     try {
-      return json(await getAssetMedia(env, s.access_token, assetMedia[1]));
+      const id = assetMedia[1];
+      const [media, rating, comments] = await Promise.all([
+        getAssetMedia(env, s.access_token, id),
+        s.access_token && env.DOCEBO_MODE === 'live' ? getAssetRating(env, s.access_token, id) : undefined,
+        s.access_token && env.DOCEBO_MODE === 'live' ? countAssetComments(env, s.access_token, id) : undefined,
+      ]);
+      return json({ ...media, myRating: rating?.rating, canRate: rating?.canRate, comments });
     } catch (e) {
       return err(502, (e as Error).message);
     }
   }
 
-  const delComment = /^\/api\/comments\/(\d+)$/.exec(path);
+  const delComment = /^\/api\/comments\/(d?)(\d+)$/.exec(path);
   if (delComment && req.method === 'DELETE') {
-    return (await deleteOwnComment(env, Number(delComment[1]), s.user_id)) ? json({ ok: true }) : err(404, 'Comment not found');
+    if (delComment[1] === 'd') {
+      try {
+        await deleteDoceboComment(env, s, delComment[2]);
+        return json({ ok: true });
+      } catch (e) {
+        return doceboErr(e);
+      }
+    }
+    return (await deleteOwnComment(env, Number(delComment[2]), s.user_id)) ? json({ ok: true }) : err(404, 'Comment not found');
   }
 
-  const m = /^\/api\/items\/([^/]+)\/(like|save|comments|progress)$/.exec(path);
+  const m = /^\/api\/items\/([^/]+)\/(like|save|comments|progress|rating|invite)$/.exec(path);
   if (!m) return err(404, 'Not found');
   const key = decodeURIComponent(m[1]);
   if (!ITEM_KEY_RE.test(key)) return err(400, 'Invalid item key');
   const action = m[2];
+  const [kind, itemId] = key.split(':') as [string, string];
+  const doceboLive = env.DOCEBO_MODE === 'live' && !!s.access_token;
 
-  if ((action === 'like' || action === 'save') && req.method === 'POST') {
+  if (action === 'like' && req.method === 'POST') {
     const b = await readJson<{ on?: boolean }>(req);
     const on = b?.on !== false;
-    await setFlag(env, action === 'like' ? 'likes' : 'saves', key, s.user_id, on);
-    return json(action === 'like' ? { liked: on, likes: await likeCount(env, key) } : { saved: on });
+    await setFlag(env, 'likes', key, s.user_id, on);
+    return json({ liked: on, likes: await likeCount(env, key) });
   }
 
-  if (action === 'comments' && req.method === 'GET') return json({ comments: await listComments(env, key, s.user_id) });
+  // Save: kept in the app (drives the Saved filter) and mirrored to the learner's Docebo playlist.
+  if (action === 'save' && req.method === 'POST') {
+    const b = await readJson<{ on?: boolean }>(req);
+    const on = b?.on !== false;
+    await setFlag(env, 'saves', key, s.user_id, on);
+    try {
+      const docebo = await syncSaveToPlaylist(env, s, kind, itemId, on);
+      return json({ saved: on, docebo });
+    } catch (e) {
+      return json({ saved: on, docebo: 'failed', message: (e as Error).message });
+    }
+  }
+
+  // Comments: assets use Docebo's own asset comments; courses and learning plans stay in the app.
+  if (action === 'comments' && req.method === 'GET') {
+    if (kind === 'asset' && doceboLive) {
+      try {
+        return json({ comments: await listAssetComments(env, s, itemId), source: 'docebo' });
+      } catch (e) {
+        return doceboErr(e);
+      }
+    }
+    return json({ comments: (await listComments(env, key, s.user_id)).map((c) => ({ ...c, id: String(c.id) })), source: 'app' });
+  }
   if (action === 'comments' && req.method === 'POST') {
     const b = await readJson<{ body?: string }>(req);
     const text = (b?.body ?? '').trim();
     if (!text) return err(400, 'Comment is empty');
     if (text.length > 1000) return err(400, 'Comment is longer than 1000 characters');
-    return json({ comment: await addComment(env, key, s.user_id, s.username, text) }, 201);
+    if (kind === 'asset' && doceboLive) {
+      try {
+        return json({ comment: await addAssetComment(env, s, itemId, text), source: 'docebo' }, 201);
+      } catch (e) {
+        return doceboErr(e);
+      }
+    }
+    const c = await addComment(env, key, s.user_id, s.username, text);
+    return json({ comment: { ...c, id: String(c.id) }, source: 'app' }, 201);
+  }
+
+  // Rating (1 to 5 stars) goes straight to Docebo: asset rating or course rating.
+  if (action === 'rating' && req.method === 'POST') {
+    const b = await readJson<{ rating?: number }>(req);
+    const rating = Math.round(Number(b?.rating));
+    if (!(rating >= 1 && rating <= 5)) return err(400, 'Rating must be 1 to 5');
+    try {
+      return json(await rateItem(env, s, kind, itemId, rating));
+    } catch (e) {
+      return doceboErr(e);
+    }
+  }
+
+  // Share: Docebo "Invite to watch" (assets only).
+  if (action === 'invite') {
+    if (kind !== 'asset') return err(400, 'Invite to watch is available for assets only');
+    try {
+      if (req.method === 'GET') return json({ users: await inviteCandidates(env, s, itemId, (url.searchParams.get('q') ?? '').trim()) });
+      if (req.method === 'POST') {
+        const b = await readJson<{ userIds?: unknown[] }>(req);
+        const ids = [...new Set((b?.userIds ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 50);
+        if (!ids.length) return err(400, 'Pick at least one person');
+        return json({ invited: await sendInvites(env, s, itemId, ids) });
+      }
+    } catch (e) {
+      return doceboErr(e);
+    }
   }
 
   if (action === 'progress' && req.method === 'POST') {
     const b = await readJson<{ percent?: number }>(req);
     const pct = Math.max(0, Math.min(100, Math.round(Number(b?.percent) || 0)));
     const prev = await recordProgress(env, key, s.user_id, pct);
+    // Docebo counts an asset view when it is opened, so record it on the first play.
     let tracked = false;
-    if (key.startsWith('asset:') && pct >= COMPLETE_AT && prev < COMPLETE_AT) {
-      tracked = await recordAssetView(env, s.access_token, key.slice('asset:'.length));
+    if (kind === 'asset' && pct > 0 && prev === 0) {
+      tracked = await trackAssetView(env, s.access_token, itemId);
     }
     return json({ percent: Math.max(prev, pct), trackedInDocebo: tracked });
   }

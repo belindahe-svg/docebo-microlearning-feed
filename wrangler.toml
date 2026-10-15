@@ -24,7 +24,7 @@ DOCEBO_OAUTH_REDIRECT_URI = ""         # must match the OAuth2 app config, if Do
 # Endpoint templates. Channel list and channel assets confirmed on atalentdemo2 (2026-10-15).
 DOCEBO_CHANNEL_ITEMS_PATH = "/learn/v1/channels/{channelId}/assets"   # confirmed 200 with the learner token
 DOCEBO_CHANNELS_LIST_PATH = "/learn/v1/channels"     # used when DOCEBO_CHANNEL_ID is empty
-DOCEBO_ASSET_VIEW_PATH = ""            # leave empty until a view-tracking endpoint is confirmed
+DOCEBO_ASSET_VIEW_PATH = ""            # unused: views are tracked with PUT /share/v1/assets/{id}/track (src/social.ts)
 # Comma-separated origins allowed to frame the app.
 ALLOWED_FRAME_ANCESTORS = "https://atalentdemo2.docebosaas.com"
 SESSION_TTL_SECONDS = "3600"

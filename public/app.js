@@ -33,6 +33,8 @@
     chat: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>',
     save: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1z"/></svg>',
     play: '<svg viewBox="0 0 24 24" width="30" height="30" fill="#fff" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
+    star: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2 6.3 20.3l1.2-6.4L2.8 9.5l6.4-.8z"/></svg>',
+    share: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 11.5 13 4v4.2C6.6 9 3.8 13.2 3 19c2.5-3.6 5.8-5.2 10-5.2V18z"/></svg>',
   };
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -86,6 +88,9 @@
     return 'Start in Docebo';
   }
 
+  const canRateKind = (it) => (it.kind === 'asset' || it.kind === 'course') && it.canRate !== false;
+  const rateLabel = (it) => (it.myRating ? `${it.myRating}★` : 'Rate');
+
   function cardHtml(it, i) {
     const [c1, c2] = PALETTE[i % PALETTE.length];
     const e = it.engagement;
@@ -109,7 +114,9 @@
       <div class="rail">
         <button type="button" class="rbtn like" aria-pressed="${e.liked}" aria-label="Like">${ICON.heart}<span>${e.likes}</span></button>
         <button type="button" class="rbtn com" aria-label="Comments">${ICON.chat}<span>${e.comments}</span></button>
+        ${canRateKind(it) ? `<button type="button" class="rbtn rate" aria-pressed="${!!it.myRating}" aria-label="Rate in Docebo">${ICON.star}<span>${rateLabel(it)}</span></button>` : ''}
         <button type="button" class="rbtn save" aria-pressed="${e.saved}" aria-label="Save">${ICON.save}<span>${e.saved ? 'Saved' : 'Save'}</span></button>
+        <button type="button" class="rbtn share" aria-label="Share">${ICON.share}<span>Share</span></button>
       </div>
       ${it.videoUrl ? '<div class="bar"><i></i></div>' : ''}
     </article>`;
@@ -214,6 +221,9 @@
   }
 
   function applyMedia(it, m) {
+    if (m.myRating !== undefined) it.myRating = m.myRating || 0;
+    if (m.canRate !== undefined) it.canRate = m.canRate;
+    if (typeof m.comments === 'number') it.engagement.comments = m.comments;
     if (m.subtype) it.subtype = m.subtype;
     if (m.thumbnailUrl && !it.thumbnailUrl) it.thumbnailUrl = m.thumbnailUrl;
     if (m.youtubeId && !it.videoUrl) it.youtubeId = m.youtubeId;
@@ -225,6 +235,11 @@
     }
     const card = cards[idx];
     if (!card) return;
+    const comSpan = card.querySelector('.com span');
+    if (comSpan) comSpan.textContent = it.engagement.comments;
+    const rateBtn = card.querySelector('.rate');
+    if (rateBtn && !canRateKind(it)) rateBtn.remove();
+    else if (rateBtn) { rateBtn.querySelector('span').textContent = rateLabel(it); rateBtn.setAttribute('aria-pressed', String(!!it.myRating)); }
     const chip = card.querySelector('.chips .chip');
     if (chip) chip.textContent = kindLabel(it);
     const art = card.querySelector('.art');
@@ -312,7 +327,12 @@
     try {
       const r = await api(`/api/items/${encodeURIComponent(it.key)}/${kind}`, { method: 'POST', body: JSON.stringify({ on }) });
       if (kind === 'like') { e.liked = r.liked; e.likes = r.likes; btn.querySelector('span').textContent = e.likes; }
-      else { e.saved = r.saved; btn.querySelector('span').textContent = e.saved ? 'Saved' : 'Save'; }
+      else {
+        e.saved = r.saved;
+        btn.querySelector('span').textContent = e.saved ? 'Saved' : 'Save';
+        if (r.docebo === 'synced') toast(e.saved ? 'Saved. Also added to your Docebo playlist "Saved from Feed".' : 'Removed from your Docebo playlist.');
+        else if (r.docebo === 'failed') toast(`Saved here, but Docebo's playlist didn't accept it: ${r.message}`);
+      }
       btn.setAttribute('aria-pressed', String(kind === 'like' ? e.liked : e.saved));
     } catch (err) { toast(err.message); }
     btn.disabled = false;
@@ -337,12 +357,15 @@
   async function openSheet(i) {
     sheetItem = items[i];
     sheetList = [];
+    $('sheetSrc').textContent = '';
     renderComments(sheetList);
     sheet.classList.add('open');
     sheet.setAttribute('aria-hidden', 'false');
     $('cinput').focus();
     try {
-      sheetList = (await api(`/api/items/${encodeURIComponent(sheetItem.key)}/comments`)).comments;
+      const r = await api(`/api/items/${encodeURIComponent(sheetItem.key)}/comments`);
+      sheetList = r.comments;
+      $('sheetSrc').textContent = r.source === 'docebo' ? 'Synced with Docebo' : '';
       renderComments(sheetList);
     } catch (err) { toast(err.message); }
   }
@@ -357,6 +380,100 @@
     if (i >= 0) cards[i].querySelector('.com span').textContent = sheetList.length;
   }
 
+  // ---------- rate (Docebo rating) ----------
+  let rateItem = null;
+  function openPanel(el) { el.classList.add('open'); el.setAttribute('aria-hidden', 'false'); }
+  function closePanel(el) { el.classList.remove('open'); el.setAttribute('aria-hidden', 'true'); feedEl.focus({ preventScroll: true }); }
+
+  function openRate(i) {
+    rateItem = items[i];
+    $('rateTitle').textContent = `Rate "${rateItem.title}"`;
+    $('stars').innerHTML = [1, 2, 3, 4, 5].map((n) =>
+      `<button type="button" role="radio" aria-checked="${rateItem.myRating === n}" data-n="${n}" aria-label="${n} star${n > 1 ? 's' : ''}" class="${n <= (rateItem.myRating || 0) ? 'on' : ''}">${ICON.star}</button>`).join('');
+    openPanel($('rateSheet'));
+    $('stars').querySelector('button')?.focus();
+  }
+  $('stars').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-n]');
+    if (!b || !rateItem) return;
+    const n = Number(b.dataset.n);
+    try {
+      const r = await api(`/api/items/${encodeURIComponent(rateItem.key)}/rating`, { method: 'POST', body: JSON.stringify({ rating: n }) });
+      rateItem.myRating = r.rating || n;
+      const card = cards[items.indexOf(rateItem)];
+      const btn = card?.querySelector('.rate');
+      if (btn) { btn.querySelector('span').textContent = rateLabel(rateItem); btn.setAttribute('aria-pressed', 'true'); }
+      closePanel($('rateSheet'));
+      toast(`Rated ${rateItem.myRating}★ in Docebo.`);
+    } catch (err) { toast(err.message); }
+  });
+
+  // ---------- share (copy link + Docebo invite to watch) ----------
+  let shareItem = null;
+  const picked = new Set();
+  let shareUsers = [];
+  function renderUsers() {
+    $('ulist').innerHTML = shareUsers.length
+      ? shareUsers.map((u) => `<li><label><input type="checkbox" value="${u.id}" ${picked.has(u.id) ? 'checked' : ''}>
+          <span class="who">${esc(u.name || u.username)}</span>${u.username && u.name ? `<span class="when">${esc(u.username)}</span>` : ''}</label></li>`).join('')
+      : '<li class="empty">No people found.</li>';
+    $('sendInvite').disabled = !picked.size;
+    $('sendInvite').textContent = picked.size ? `Send invite (${picked.size})` : 'Send invite';
+  }
+  async function loadUsers(q) {
+    try {
+      shareUsers = (await api(`/api/items/${encodeURIComponent(shareItem.key)}/invite?q=${encodeURIComponent(q)}`)).users;
+      renderUsers();
+    } catch (err) { $('ulist').innerHTML = `<li class="empty">${esc(err.message)}</li>`; }
+  }
+  function openShare(i) {
+    shareItem = items[i];
+    picked.clear();
+    shareUsers = [];
+    $('linkBox').hidden = true;
+    $('copyLink').textContent = 'Copy link';
+    const invite = shareItem.kind === 'asset';
+    $('inviteBox').hidden = !invite;
+    $('inviteSearch').value = '';
+    if (invite) { $('ulist').innerHTML = '<li class="empty">Loading suggestions</li>'; loadUsers(''); }
+    openPanel($('shareSheet'));
+  }
+  $('copyLink').addEventListener('click', async () => {
+    const link = shareItem?.doceboUrl || '';
+    try {
+      await navigator.clipboard.writeText(link);
+      $('copyLink').textContent = 'Link copied';
+    } catch {
+      const box = $('linkBox');
+      box.hidden = false;
+      box.value = link;
+      box.select();
+      $('copyLink').textContent = 'Press Ctrl+C or Cmd+C to copy';
+    }
+  });
+  let invTimer;
+  $('inviteSearch').addEventListener('input', () => {
+    clearTimeout(invTimer);
+    const q = $('inviteSearch').value.trim();
+    invTimer = setTimeout(() => { if (q.length === 0 || q.length >= 3) loadUsers(q); }, 250);
+  });
+  $('ulist').addEventListener('change', (e) => {
+    const id = Number(e.target.value);
+    if (e.target.checked) picked.add(id); else picked.delete(id);
+    renderUsers();
+  });
+  $('sendInvite').addEventListener('click', async () => {
+    if (!picked.size || !shareItem) return;
+    $('sendInvite').disabled = true;
+    try {
+      const r = await api(`/api/items/${encodeURIComponent(shareItem.key)}/invite`, { method: 'POST', body: JSON.stringify({ userIds: [...picked] }) });
+      closePanel($('shareSheet'));
+      toast(`Invited ${r.invited} ${r.invited === 1 ? 'person' : 'people'} to watch. Docebo will notify them.`);
+    } catch (err) { toast(err.message); $('sendInvite').disabled = false; }
+  });
+  document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => closePanel($(b.dataset.close))));
+  [$('rateSheet'), $('shareSheet')].forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePanel(el); }));
+
   // ---------- events ----------
   feedEl.addEventListener('click', (e) => {
     const card = e.target.closest('.card');
@@ -368,6 +485,8 @@
     if (like) return void toggleFlag(like, it, 'like');
     if (save) return void toggleFlag(save, it, 'save');
     if (e.target.closest('.com')) return void openSheet(i);
+    if (e.target.closest('.rate')) return void openRate(i);
+    if (e.target.closest('.share')) return void openShare(i);
     if (e.target.closest('.mute')) return void setMuted(!muted);
     if (e.target.closest('a')) return;
     togglePlay(card);
@@ -383,9 +502,9 @@
   clist.addEventListener('click', async (e) => {
     const del = e.target.closest('.del');
     if (!del) return;
-    const id = Number(del.closest('li').dataset.id);
+    const id = del.closest('li').dataset.id;
     try {
-      await api(`/api/comments/${id}`, { method: 'DELETE' });
+      await api(`/api/comments/${encodeURIComponent(id)}`, { method: 'DELETE' });
       sheetList = sheetList.filter((c) => c.id !== id);
       renderComments(sheetList);
       updateCommentCount();
