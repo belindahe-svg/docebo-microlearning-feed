@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Bite-size Learning</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="stage">
+    <div class="feed" id="feed" tabindex="0" aria-label="Learning feed. Use the arrow keys to move between items."></div>
+
+    <div class="status" id="status" role="status">Loading your feed</div>
+
+    <section class="sheet" id="sheet" aria-label="Comments" aria-hidden="true">
+      <header>
+        <b id="sheetTitle">Comments</b>
+        <button type="button" id="closeSheet" aria-label="Close comments">×</button>
+      </header>
+      <ul class="clist" id="clist"></ul>
+      <form class="cform" id="cform">
+        <input id="cinput" maxlength="1000" placeholder="Add a comment" autocomplete="off" aria-label="Comment">
+        <button type="submit">Post</button>
+      </form>
+    </section>
+
+    <div class="toast" id="toast" role="alert" hidden></div>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

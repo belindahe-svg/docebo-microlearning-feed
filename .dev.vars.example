@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `wrangler dev`. Never commit .dev.vars.
+DOCEBO_SALT_SECRET=dev-salt
+DOCEBO_OAUTH_CLIENT_SECRET=
+ADMIN_TOKEN=dev-admin
