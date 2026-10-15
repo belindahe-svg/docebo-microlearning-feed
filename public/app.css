@@ -70,3 +70,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 
 .toast{position:absolute;left:12px;right:12px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:9;background:#2a2433;color:#fff;border-radius:10px;padding:10px 14px;font-size:13px}
 @media (prefers-reduced-motion:reduce){.sheet{transition:none}}
+
+/* Discovery mode (admin only) */
+.discover{min-height:100%;background:#15131b;color:#ece9f3;padding:20px 16px;overflow-y:auto}
+.discover h1{font-family:var(--display);font-size:20px;margin:0 0 6px}
+.discover p{font-size:13px;color:#a39eb3;margin:0 0 12px}
+.discover button{border:0;border-radius:999px;background:#b89bf0;color:#15131b;font-weight:600;padding:8px 16px;margin-bottom:12px}
+.discover pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,Menlo,monospace;background:#1f1c27;border-radius:10px;padding:12px;margin:0}

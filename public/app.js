@@ -56,6 +56,8 @@
     const s = await api('/api/session', { method: 'POST', body: JSON.stringify(params) });
     token = s.token;
     me = s.user;
+    startSession.discovery = !!s.discovery;
+    startSession.receivedParams = s.receivedParams || [];
     // The auth code is single-use; remove it from the address so it is never reused or logged.
     if (location.search) history.replaceState(null, '', location.pathname);
   }
@@ -283,10 +285,46 @@
     } catch (err) { toast(err.message); }
   });
 
+  // ---------- discovery mode ----------
+  async function showDiscovery() {
+    statusEl.textContent = 'Checking Docebo endpoints';
+    const d = await api('/api/discover');
+    const lines = [
+      `Docebo endpoint check for ${d.domain}`,
+      `Channel ID: ${d.channelId ?? '(not set)'}`,
+      `iFrame parameters received: ${startSession.receivedParams.join(', ')}`,
+      '',
+      ...d.results.map((r) => `${String(r.status).padEnd(4)} ${r.label}\n     ${r.path}${r.detail ? `\n     ${r.detail}` : ''}`),
+    ];
+    const text = lines.join('\n');
+    statusEl.hidden = true;
+    feedEl.innerHTML = `<section class="discover">
+      <h1>Endpoint check</h1>
+      <p>Read-only checks run with your own Docebo session. Copy the results and paste them to Claude.</p>
+      <button type="button" id="copyDiscover">Copy results</button>
+      <pre id="discoverText"></pre>
+    </section>`;
+    $('discoverText').textContent = text;
+    $('copyDiscover').addEventListener('click', async (e) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        e.target.textContent = 'Copied';
+      } catch {
+        const r = document.createRange();
+        r.selectNodeContents($('discoverText'));
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        e.target.textContent = 'Press Ctrl+C or Cmd+C to copy';
+      }
+    });
+  }
+
   // ---------- boot ----------
   (async () => {
     try {
       await startSession();
+      if (startSession.discovery) return void (await showDiscovery());
       const feed = await api('/api/feed');
       items = feed.items;
       if (!items.length) { statusEl.textContent = 'This channel has no items yet.'; return; }

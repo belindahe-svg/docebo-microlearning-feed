@@ -48,6 +48,22 @@ curl -X PUT http://localhost:8787/api/admin/media/asset:32 \
   -d '{"video_url":"https://<your-cdn>/sample.mp4"}'
 ```
 
+## Deploy from the Cloudflare dashboard (no terminal)
+
+Everything below happens in the browser. Cloudflare builds and deploys from this GitHub repo on every push.
+
+1. **Database.** Cloudflare dashboard → Storage & Databases → D1 → Create database, named `microlearning-feed`. Copy its **Database ID** into `wrangler.toml` (`database_id`). Then open the database's **Console** tab, paste the contents of `migrations/0001_init.sql` and run it.
+2. **Worker.** Workers & Pages → Create → **Import a repository** → pick `docebo-microlearning-feed`. Leave the build command empty; deploy command `npx wrangler deploy`. Note the Worker URL it gives you (e.g. `https://docebo-microlearning-feed.<you>.workers.dev`).
+3. **Secrets.** Worker → Settings → Variables and Secrets → add as **Secret**: `DOCEBO_SALT_SECRET`, `DOCEBO_OAUTH_CLIENT_SECRET`, `ADMIN_TOKEN`.
+4. **Settings.** Plain settings live in `wrangler.toml` (edit on GitHub; each push redeploys). Values typed into the dashboard for those names are overwritten by `wrangler.toml` on the next deploy.
+
+### Discovery mode (confirm the endpoints without a terminal)
+
+1. In `wrangler.toml` set `DOCEBO_MODE = "live"`, `DOCEBO_OAUTH_CLIENT_ID`, `DOCEBO_CHANNEL_ID` (optional; leave empty to just list channels), and `DISCOVERY_USERS` to your Docebo username.
+2. In Docebo, create the OAuth2 app (redirect URL = the Worker URL) and add the iFrame widget to a widget page (Advanced Settings on, same OAuth2 app, salt secret).
+3. Open that page as yourself. Instead of the feed you'll see an **Endpoint check**: status codes and field names for each candidate path, plus the iFrame parameter names Docebo sent. Click **Copy results**.
+4. Once the endpoints are confirmed, clear `DISCOVERY_USERS`.
+
 ## Go live against Docebo
 
 1. **Create an OAuth2 app** in Docebo (Admin menu → API and SSO → API credentials). Note the client ID and secret.

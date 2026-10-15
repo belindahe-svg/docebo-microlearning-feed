@@ -27,6 +27,10 @@ DOCEBO_ASSET_VIEW_PATH = ""            # leave empty until a view-tracking endpo
 # Comma-separated origins allowed to frame the app.
 ALLOWED_FRAME_ANCESTORS = "https://atalentdemo2.docebosaas.com"
 SESSION_TTL_SECONDS = "3600"
+# Discovery mode: Docebo usernames or user IDs (comma-separated) who see endpoint checks instead of
+# the feed. Read-only. Clear this once the endpoints are confirmed.
+DISCOVERY_USERS = ""
+DISCOVERY_ASSET_ID = "32"
 
 # Secrets (set with `npx wrangler secret put NAME`, never commit):
 #   DOCEBO_SALT_SECRET          salt from the iFrame widget's Advanced Settings

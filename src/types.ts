@@ -13,6 +13,8 @@ export interface Env {
   DOCEBO_SALT_SECRET: string;
   DOCEBO_OAUTH_CLIENT_SECRET: string;
   ADMIN_TOKEN: string;
+  DISCOVERY_USERS?: string;
+  DISCOVERY_ASSET_ID?: string;
 }
 
 export type ItemKind = 'asset' | 'course' | 'learning_plan';

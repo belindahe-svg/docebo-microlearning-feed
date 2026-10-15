@@ -1,6 +1,7 @@
 import type { Env, Session } from './types';
 import { createSession, exchangeAuthCode, getSession, readIframeParams, timingSafeEqual, verifyIframeHash } from './auth';
 import { getChannelItems, recordAssetView } from './docebo';
+import { isDiscoveryUser, runDiscovery } from './discover';
 import {
   ITEM_KEY_RE,
   addComment,
@@ -71,7 +72,13 @@ async function handleSession(req: Request, env: Env): Promise<Response> {
     return err(502, (e as Error).message);
   }
   const s = await createSession(env, p.userId, p.username, token.access_token, Math.min(ttl, token.expires_in ?? ttl));
-  return json({ token: s.id, user: { id: s.user_id, username: s.username }, mode: 'live' });
+  return json({
+    token: s.id,
+    user: { id: s.user_id, username: s.username },
+    mode: 'live',
+    discovery: isDiscoveryUser(env, s.user_id, s.username),
+    receivedParams: Object.keys(body),
+  });
 }
 
 async function handleFeed(env: Env, s: Session): Promise<Response> {
@@ -125,6 +132,12 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (!s) return err(401, 'Session expired. Reload the page in Docebo.');
 
   if (path === '/api/feed' && req.method === 'GET') return handleFeed(env, s);
+
+  if (path === '/api/discover' && req.method === 'GET') {
+    if (!isDiscoveryUser(env, s.user_id, s.username)) return err(403, 'Discovery is not enabled for this user');
+    if (!s.access_token) return err(400, 'Discovery needs live mode (a real Docebo session)');
+    return json({ domain: env.DOCEBO_DOMAIN, channelId: env.DOCEBO_CHANNEL_ID || null, results: await runDiscovery(env, s.access_token) });
+  }
 
   const delComment = /^\/api\/comments\/(\d+)$/.exec(path);
   if (delComment && req.method === 'DELETE') {
