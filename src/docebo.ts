@@ -87,12 +87,53 @@ export async function doceboGet(env: Env, token: string, path: string): Promise<
   return res.json();
 }
 
+/** Pull a channel ID out of one row of a channel list. */
+export function channelIdOf(o: Json): string | undefined {
+  return str(pick(o, 'id', 'id_channel', 'channel_id', 'idChannel'));
+}
+
+/** IDs of every channel the learner can see. Docebo filters the list by the token's user. */
+export async function listVisibleChannelIds(env: Env, token: string): Promise<string[]> {
+  const path = env.DOCEBO_CHANNELS_LIST_PATH || '/learn/v1/channels';
+  const ids: string[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const sep = path.includes('?') ? '&' : '?';
+    const body = (await doceboGet(env, token, `${path}${sep}page=${page}&page_size=50`)) as Json;
+    for (const row of extractRows(body)) {
+      const id = channelIdOf(row);
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    const data = (body?.data ?? {}) as Json;
+    if (!data.has_more_data) break;
+  }
+  return ids;
+}
+
+/** Merge item lists, keeping the first occurrence of each item key. */
+export function dedupeItems(lists: FeedItem[][]): FeedItem[] {
+  const seen = new Set<string>();
+  const out: FeedItem[] = [];
+  for (const list of lists) for (const it of list) if (!seen.has(it.key)) { seen.add(it.key); out.push(it); }
+  return out;
+}
+
+/**
+ * Feed items. With DOCEBO_CHANNEL_ID set, reads that one channel. With it empty, reads every
+ * channel visible to the learner and merges them (duplicates removed, channel order kept).
+ */
 export async function getChannelItems(env: Env, token: string | null): Promise<FeedItem[]> {
   if (env.DOCEBO_MODE !== 'live') return MOCK_ITEMS;
   if (!token) throw new Error('No Docebo token for this session');
-  if (!env.DOCEBO_CHANNEL_ID) throw new Error('DOCEBO_CHANNEL_ID is not set');
+  if (env.DOCEBO_CHANNEL_ID) return getItemsForChannel(env, token, env.DOCEBO_CHANNEL_ID);
+  const channelIds = (await listVisibleChannelIds(env, token)).slice(0, 20);
+  // One failing channel should not empty the whole feed.
+  const lists = await Promise.all(channelIds.map((id) => getItemsForChannel(env, token, id).catch(() => [])));
+  return dedupeItems(lists);
+}
+
+async function getItemsForChannel(env: Env, token: string, channelId: string): Promise<FeedItem[]> {
   const items: FeedItem[] = [];
-  const pathTpl = env.DOCEBO_CHANNEL_ITEMS_PATH.replace('{channelId}', encodeURIComponent(env.DOCEBO_CHANNEL_ID));
+  const pathTpl = env.DOCEBO_CHANNEL_ITEMS_PATH.replace('{channelId}', encodeURIComponent(channelId));
   // Follow Docebo-style pagination (page / page_size / has_more_data), capped for safety.
   for (let page = 1; page <= 10; page++) {
     const sep = pathTpl.includes('?') ? '&' : '?';

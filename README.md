@@ -59,7 +59,7 @@ Everything below happens in the browser. Cloudflare builds and deploys from this
 
 ### Discovery mode (confirm the endpoints without a terminal)
 
-1. In `wrangler.toml` set `DOCEBO_MODE = "live"`, `DOCEBO_OAUTH_CLIENT_ID`, `DOCEBO_CHANNEL_ID` (optional; leave empty to just list channels), and `DISCOVERY_USERS` to your Docebo username.
+1. In `wrangler.toml` set `DOCEBO_MODE = "live"`, `DOCEBO_OAUTH_CLIENT_ID`, `DOCEBO_CHANNEL_ID` (optional; leave empty to use every channel the learner can see, and discovery then probes the item endpoints on the first visible channel), and `DISCOVERY_USERS` to your Docebo username.
 2. In Docebo, create the OAuth2 app (redirect URL = the Worker URL) and add the iFrame widget to a widget page (Advanced Settings on, same OAuth2 app, salt secret).
 3. Open that page as yourself. Instead of the feed you'll see an **Endpoint check**: status codes and field names for each candidate path, plus the iFrame parameter names Docebo sent. Click **Copy results**.
 4. Once the endpoints are confirmed, clear `DISCOVERY_USERS`.
@@ -72,7 +72,7 @@ Everything below happens in the browser. Cloudflare builds and deploys from this
    DOCEBO_DOMAIN=atalentdemo2.docebosaas.com DOCEBO_TOKEN=… CHANNEL_ID=… npm run discover
    ```
    Set `DOCEBO_CHANNEL_ITEMS_PATH` to the path that returns the channel's items. If the asset detail has no streamable video URL, use media overrides. Set `DOCEBO_ASSET_VIEW_PATH` only once a view or completion endpoint is confirmed.
-3. **Configure** `wrangler.toml`: `DOCEBO_MODE = "live"`, `DOCEBO_CHANNEL_ID`, `DOCEBO_OAUTH_CLIENT_ID`, `ALLOWED_FRAME_ANCESTORS`.
+3. **Configure** `wrangler.toml`: `DOCEBO_MODE = "live"`, `DOCEBO_CHANNEL_ID` (empty = all channels visible to the learner, merged and de-duplicated), `DOCEBO_OAUTH_CLIENT_ID`, `ALLOWED_FRAME_ANCESTORS`.
 4. **Set secrets**:
    ```bash
    npx wrangler secret put DOCEBO_SALT_SECRET

@@ -41,3 +41,23 @@ describe('mock items', () => {
     for (const i of MOCK_ITEMS) expect(i.doceboUrl).toMatch(/^https:\/\/atalentdemo2\.docebosaas\.com\//);
   });
 });
+
+import { channelIdOf, dedupeItems } from '../src/docebo';
+import { firstChannelId } from '../src/discover';
+
+describe('all visible channels', () => {
+  it('reads channel IDs from common field names', () => {
+    expect(channelIdOf({ id: 7 })).toBe('7');
+    expect(channelIdOf({ id_channel: '12' })).toBe('12');
+    expect(channelIdOf({ name: 'x' })).toBeUndefined();
+  });
+  it('merges channels without duplicates, keeping order', () => {
+    const a = { key: 'asset:1', id: '1', kind: 'asset', subtype: '', title: 'A', doceboUrl: '' } as const;
+    const b = { ...a, key: 'course:2', id: '2', kind: 'course', title: 'B' } as const;
+    expect(dedupeItems([[a, b], [b, a]]).map((i) => i.key)).toEqual(['asset:1', 'course:2']);
+  });
+  it('finds the first channel in a list response', () => {
+    expect(firstChannelId({ data: { items: [{ id: 5, name: 'Bite-size' }] } })).toBe('5');
+    expect(firstChannelId({ data: { items: [] } })).toBeUndefined();
+  });
+});

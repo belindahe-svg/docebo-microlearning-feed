@@ -47,19 +47,41 @@ export function describeBody(body: unknown): string {
   return `Object. Fields: ${Object.keys(data ?? {}).join(', ')}`;
 }
 
+/** First channel ID in a channel-list response, used to probe item endpoints when none is configured. */
+export function firstChannelId(body: unknown): string | undefined {
+  const b = body as Json;
+  const data = (b?.data ?? b) as Json;
+  const rows = (data?.items ?? data?.results ?? (Array.isArray(data) ? data : null)) as unknown;
+  if (!Array.isArray(rows) || !rows.length) return undefined;
+  const r = rows[0] as Json;
+  const id = r.id ?? r.id_channel ?? r.channel_id ?? r.idChannel;
+  return id === undefined || id === null || id === '' ? undefined : String(id);
+}
+
 export async function runDiscovery(env: Env, token: string) {
   const assetId = env.DISCOVERY_ASSET_ID || '32';
-  const results = [];
-  for (const [label, path] of candidatePaths(env.DOCEBO_CHANNEL_ID, assetId)) {
+  const results: Array<{ label: string; path: string; status: number; detail: string }> = [];
+  let channelId = env.DOCEBO_CHANNEL_ID;
+  const probe = async (label: string, path: string) => {
     try {
       const res = await fetch(`https://${env.DOCEBO_DOMAIN}${path}`, {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
       });
-      const detail = res.ok ? describeBody(await res.json().catch(() => ({}))) : '';
-      results.push({ label, path, status: res.status, detail });
+      const body = res.ok ? await res.json().catch(() => ({})) : undefined;
+      results.push({ label, path, status: res.status, detail: body === undefined ? '' : describeBody(body) });
+      return body;
     } catch (e) {
       results.push({ label, path, status: 0, detail: (e as Error).message });
+      return undefined;
     }
+  };
+  // Channel lists first, so the item endpoints can be tried on a real channel the learner can see.
+  for (const [label, path] of candidatePaths('', assetId).filter(([, p]) => p.endsWith('/channels'))) {
+    const body = await probe(label, path);
+    if (!channelId && body !== undefined) channelId = firstChannelId(body) ?? '';
+  }
+  for (const [label, path] of candidatePaths(channelId, assetId).filter(([, p]) => !p.endsWith('/channels'))) {
+    await probe(channelId && !env.DOCEBO_CHANNEL_ID && path.includes('/channels/') ? `${label} (first visible channel #${channelId})` : label, path);
   }
   return results;
 }
