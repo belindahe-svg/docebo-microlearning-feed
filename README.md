@@ -109,6 +109,8 @@ Endpoints come from the instance's own API spec (`/share/v1/swagger`, `/learn/v1
 | Share | Invite to watch (`/share/v1/assets/{id}/invitations`) + copy link | Copy link | Copy link |
 | Watch | `PUT /share/v1/assets/{id}/track` on first play | n/a | n/a |
 
+**My posts** (filter chip): the learner's contributions from `GET /share/v1/user/myassets` (incl. hidden and converting), each with a status badge that also reads per-channel review from `GET /share/v1/assets/{id}` (`channels[].peer_review`). Delete uses `DELETE /share/v1/assets/{id}` when Docebo lists `DeleteAsset` for the learner.
+
 **+ Share content** (top bar): Docebo's contribute flow. Links use `POST /share/v1/link` (or `/share/v1/videolink` for YouTube, Vimeo, Wistia) with `/share/v1/link/meta` for the preview. Files: the Worker gets a presigned URL (`GET /manage/v1/upload/presigned_url`, collection `app7020`), streams the upload to it (up to 95 MB), then `POST /share/v1/assets` and `PUT /share/v1/assets/{id}/channels`. Channel upload permissions and expert review are Docebo's.
 
 ## Security notes

@@ -1,6 +1,6 @@
 import type { Env, Session } from './types';
 import { createSession, exchangeAuthCode, getSession, readIframeParams, timingSafeEqual, verifyIframeHash } from './auth';
-import { getAssetMedia, getChannelItems } from './docebo';
+import { getAssetMedia, getChannelItems, normalizeItem } from './docebo';
 import {
   DoceboError,
   addAssetComment,
@@ -15,8 +15,10 @@ import {
   contributeFile,
   contributeLink,
   createPlaylistWith,
+  deleteMyAsset,
   linkMeta,
   logStep,
+  myContributions,
   listPlaylistsFor,
   setPlaylistItem,
   trackAssetView,
@@ -191,6 +193,32 @@ async function route(req: Request, env: Env): Promise<Response> {
       return json({ ...media, myRating: rating?.rating, canRate: rating?.canRate, comments });
     } catch (e) {
       return err(502, (e as Error).message);
+    }
+  }
+
+  // ---------- My posts: the learner's own contributions with review status ----------
+  if (path === '/api/mine' && req.method === 'GET') {
+    try {
+      const mine = await myContributions(env, s);
+      const items = mine
+        .map((m) => {
+          const it = normalizeItem(m.row as Record<string, unknown>, env.DOCEBO_DOMAIN);
+          return it ? { ...it, channels: m.channels, myStatus: m.status } : null;
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+      const eng = await engagementFor(env, s.user_id, items.map((i) => i.key));
+      return json({ items: items.map((i) => ({ ...i, engagement: eng[i.key] })) });
+    } catch (e) {
+      return doceboErr(e);
+    }
+  }
+  const delMine = /^\/api\/mine\/(\d+)$/.exec(path);
+  if (delMine && req.method === 'DELETE') {
+    try {
+      await deleteMyAsset(env, s, delMine[1]);
+      return json({ ok: true });
+    } catch (e) {
+      return doceboErr(e);
     }
   }
 

@@ -421,3 +421,63 @@ export async function contributeFile(env: Env, s: Session, a: { storedName: stri
   const pub = await publishAsset(env, s, id);
   return { id, channelErrors, published: pub.published };
 }
+
+// ---------- My posts (the learner's own contributions) ----------
+
+export interface MyPostStatus {
+  label: string;                       // shown on the card badge
+  tone: 'live' | 'wait' | 'bad' | 'draft';
+  canDelete: boolean;
+}
+
+/**
+ * The learner's contributions from Docebo's My Channel (GET /share/v1/user/myassets, including hidden
+ * and still-converting items), each with a status that accounts for per-channel review: an asset can
+ * be published yet still "waiting" for peer review in a channel (channels[].peer_review on the detail).
+ */
+export async function myContributions(env: Env, s: Session): Promise<Array<{ row: Json; status: MyPostStatus; channels: string[] }>> {
+  if (!live(env, s)) return [];
+  const j = await doceboCall(env, s.access_token, 'GET',
+    '/share/v1/user/myassets?page_size=50&sort_attr=date&sort_dir=desc&with_visibility=both&show_loading=true');
+  const rows = itemsOf(j)
+    // My Channel can list items the learner was invited to; keep the learner's own.
+    .filter((r) => !r.owner || String((r.owner as Json).id ?? '') === String(s.user_id) || !(r.inviter))
+    .slice(0, 30); // each needs a detail call; stay well inside the Workers subrequest budget
+  return Promise.all(rows.map(async (row) => {
+    const of = (row.other_fields ?? {}) as Json;
+    const actions = Array.isArray(row.actions) ? (row.actions as Json[]).map((a) => String(a.type)) : [];
+    const canDelete = actions.includes('DeleteAsset');
+    let channels: Json[] = [];
+    let conversion: unknown;
+    try {
+      const d = dataOf(await doceboCall(env, s.access_token, 'GET', `/share/v1/assets/${encodeURIComponent(String(row.id))}`));
+      channels = Array.isArray(d.channels) ? (d.channels as Json[]) : [];
+      conversion = d.conversion_status;
+    } catch { /* fall back to My Channel's own status */ }
+    const names = channels.map((c) => String(c.name ?? `Channel ${c.channel_id}`));
+    const statusKey = String(of.status ?? '').toLowerCase();
+    const waiting = channels.filter((c) => String(c.peer_review ?? '').toLowerCase() === 'waiting').map((c) => String(c.name));
+    const rejected = channels.filter((c) => String(c.peer_review ?? '').toLowerCase() === 'rejected').map((c) => String(c.name));
+    let status: MyPostStatus;
+    if (statusKey && statusKey !== 'published') {
+      const label = String(of.status_label ?? statusKey);
+      status = { label, tone: /review|wait|pending/i.test(label) ? 'wait' : /reject/i.test(label) ? 'bad' : /convert|process|upload/i.test(label) ? 'wait' : 'draft', canDelete };
+    } else if (Number(conversion) > 0 && Number(conversion) < 20) {
+      status = { label: 'Processing', tone: 'wait', canDelete };
+    } else if (rejected.length && !waiting.length && rejected.length === channels.length) {
+      status = { label: `Rejected in ${rejected.join(', ')}`, tone: 'bad', canDelete };
+    } else if (waiting.length) {
+      status = { label: `Waiting for review in ${waiting.join(', ')}`, tone: 'wait', canDelete };
+    } else if (!channels.length) {
+      status = { label: 'Published to your channel only', tone: 'live', canDelete };
+    } else {
+      status = { label: 'Published', tone: 'live', canDelete };
+    }
+    return { row, status, channels: names };
+  }));
+}
+
+export async function deleteMyAsset(env: Env, s: Session, id: string): Promise<void> {
+  if (!live(env, s)) throw new DoceboError(400, 'Deleting needs live mode');
+  await doceboCall(env, s.access_token, 'DELETE', `/share/v1/assets/${encodeURIComponent(id)}`);
+}

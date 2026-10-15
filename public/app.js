@@ -80,6 +80,8 @@
   }
 
   function kindLabel(it) {
+    // Docebo's raw type ("asset", "course") repeats the kind; only real subtypes are worth showing.
+    if (!it.subtype || it.subtype.toLowerCase() === it.kind || it.subtype === 'learning_plan') it = { ...it, subtype: '' };
     if (it.kind === 'course') return it.subtype ? `${it.subtype} course` : 'Course';
     if (it.kind === 'learning_plan') return 'Learning plan';
     return it.subtype ? `${it.subtype} asset` : 'Asset';
@@ -110,10 +112,10 @@
       ${yt ? `<div class="playstate">${ICON.play}</div>` : ''}
       <div class="shade"></div>
       <div class="meta">
-        <div class="chips"><span class="chip">${esc(kindLabel(it))}</span>${statusChip(it.status)}${it.rating ? `<span class="chip">★ ${esc(it.rating)}</span>` : ''}</div>
+        <div class="chips">${it.myStatus ? `<span class="chip st-${esc(it.myStatus.tone)}">${esc(it.myStatus.label)}</span>` : ''}<span class="chip kind">${esc(kindLabel(it))}</span>${statusChip(it.status)}${it.rating ? `<span class="chip">★ ${esc(it.rating)}</span>` : ''}</div>
         <p class="ttl">${esc(it.title)}</p>
         ${it.description ? `<p class="desc">${esc(it.description)}</p>` : ''}
-        <a class="cta" href="${esc(it.doceboUrl)}" target="_top">${ctaLabel(it)}</a>
+        <a class="cta" href="${esc(it.doceboUrl)}" target="_top">${ctaLabel(it)}</a>${it.myStatus?.canDelete ? '<button type="button" class="delmine">Delete</button>' : ''}
       </div>
       <div class="rail">
         <button type="button" class="rbtn com" aria-label="Comments">${ICON.chat}<span>${e.comments}</span></button>
@@ -242,7 +244,7 @@
     if (comSpan) comSpan.textContent = it.engagement.comments;
     const rateBtn = card.querySelector('.rate');
     if (rateBtn) { rateBtn.querySelector('span').textContent = rateLabel(it); rateBtn.setAttribute('aria-pressed', String(!!it.myRating)); }
-    const chip = card.querySelector('.chips .chip');
+    const chip = card.querySelector('.chips .kind');
     if (chip) chip.textContent = kindLabel(it);
     const art = card.querySelector('.art');
     if (art && it.thumbnailUrl && !art.querySelector('img')) {
@@ -656,9 +658,10 @@
         postResult = await api('/api/contribute', { method: 'POST', body: JSON.stringify({ type: 'file', storedName, originalName: f.name, mime: f.type, title, description, channels }) });
       }
       closePanel($('postSheet'));
+      mine = null;
       if (postResult.channelErrors) toast(`Shared, but some channels refused it: ${postResult.channelErrors}`);
       else if (!postResult.published) toast('Saved in Docebo as a draft, but Docebo did not let you publish it. Open it in My Channel to publish.');
-      else toast(`Published to Docebo.${postTab === 'file' || postTab === 'upload' ? ' Videos take a few minutes to process.' : ''} Channels that need expert review show it once an expert approves it.`);
+      else toast(`Published to Docebo.${postTab === 'upload' ? ' Videos take a few minutes to process.' : ''} Track it under My posts.`);
     } catch (err) {
       $('postError').hidden = false;
       $('postError').textContent = err.message;
@@ -668,6 +671,18 @@
     $('postSubmit').textContent = 'Publish';
   });
   [$('plSheet'), $('postSheet')].forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePanel(el); }));
+
+  // ---------- My posts: delete own contribution ----------
+  async function deleteMine(it) {
+    if (!confirm(`Delete "${it.title}" from Docebo? This removes it from every channel and cannot be undone.`)) return;
+    try {
+      await api(`/api/mine/${encodeURIComponent(it.id)}`, { method: 'DELETE' });
+      mine = (mine || []).filter((x) => x.key !== it.key);
+      all = all.filter((x) => x.key !== it.key);
+      applyFilter();
+      toast(`Deleted "${it.title}".`);
+    } catch (err) { toast(err.message); }
+  }
 
   // ---------- events ----------
   feedEl.addEventListener('click', (e) => {
@@ -688,6 +703,7 @@
     if (e.target.closest('.com')) return void openSheet(i);
     if (e.target.closest('.rate')) return void openRate(i);
     if (e.target.closest('.share')) return void openShare(i);
+    if (e.target.closest('.delmine')) return void deleteMine(it);
     if (e.target.closest('.mute')) return void setMuted(!muted);
     if (e.target.closest('a')) return;
     togglePlay(card);
@@ -770,12 +786,14 @@
 
   // ---------- filters and search ----------
   const filtersEl = $('filters');
-  const TYPES = [['all', 'All'], ['videos', 'Videos'], ['courses', 'Courses'], ['saved', 'Saved']];
+  const TYPES = [['all', 'All'], ['videos', 'Videos'], ['courses', 'Courses'], ['saved', 'Saved'], ['mine', 'My posts']];
+  let mine = null; // the learner's contributions, loaded when "My posts" is opened
 
   function isVideo(it) { return !!(it.videoUrl || it.youtubeId || /video/i.test(it.subtype || '')); }
 
   function matches(it) {
-    if (filter.type === 'videos' && !isVideo(it)) return false;
+    if (filter.type === 'mine') { /* the source list is already the learner's own posts */ }
+    else if (filter.type === 'videos' && !isVideo(it)) return false;
     if (filter.type === 'courses' && it.kind !== 'course' && it.kind !== 'learning_plan') return false;
     if (filter.type === 'saved' && !it.engagement?.saved) return false;
     if (filter.channel && !(it.channels || []).includes(filter.channel)) return false;
@@ -798,6 +816,7 @@
     if (filter.q) return `Nothing matches "${filter.q}".`;
     if (filter.type === 'saved') return 'Nothing saved yet. Tap Save on any card to keep it here.';
     if (filter.type === 'videos') return 'No videos here yet.';
+    if (filter.type === 'mine') return 'You have not shared anything yet. Tap + to share a video, file or link.';
     return 'Nothing here yet.';
   }
 
@@ -807,7 +826,7 @@
       stopYouTube(cards[cur]);
     }
     cur = -1;
-    items = all.filter(matches);
+    items = (filter.type === 'mine' ? mine || [] : all).filter(matches);
     renderChips();
     feedEl.scrollTop = 0;
     if (!items.length) {
@@ -832,6 +851,12 @@
       filter.channel = '';
     } else {
       filter.type = filter.type === b.dataset.type ? 'all' : b.dataset.type;
+    }
+    if (filter.type === 'mine') {
+      feedEl.innerHTML = '';
+      statusEl.hidden = false;
+      statusEl.textContent = 'Loading your posts';
+      try { mine = (await api('/api/mine')).items; } catch (err) { mine = []; toast(err.message); }
     }
     if (filter.type === 'videos' && all.some((it) => it.kind === 'asset' && !mediaReq.has(it.key))) {
       feedEl.innerHTML = '';

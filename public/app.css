@@ -166,3 +166,10 @@ html,body{overflow:hidden}
 .stage{overflow:clip}
 .hint.left{text-align:left;margin:0}
 .hint[hidden]{display:none}
+
+/* My posts */
+.chip.st-live{background:#7fcf9c;color:#062611}
+.chip.st-wait{background:#f2b33d;color:#2a1d00}
+.chip.st-bad{background:#ff8a8a;color:#3b0a0a}
+.chip.st-draft{background:rgba(255,255,255,.85);color:#1d1a26}
+.delmine{margin-left:8px;border:1px solid rgba(255,255,255,.6);background:rgba(0,0,0,.35);color:#fff;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:600}
