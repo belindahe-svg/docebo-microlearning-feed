@@ -23,3 +23,18 @@ describe('discovery', () => {
     expect(d).toContain('#7 "Bite-size Learning"');
   });
 });
+
+import { firstChannelId as pickChannel } from '../src/discover';
+describe('discovery channel choice and shapes', () => {
+  it('prefers a custom channel over a predefined one', () => {
+    expect(pickChannel({ data: { items: [{ id: 7, predefined_uid: 'continue' }, { id: 12, predefined_uid: null }] } })).toBe('12');
+    expect(pickChannel({ data: { items: [{ id: 7, predefined_uid: 'x' }] } })).toBe('7');
+  });
+  it('reports nested field names without values', () => {
+    const out = describeBody({ data: { items: [{ id: 7, name: 'A', sub_items: [] }, { id: 9, name: 'B', sub_items: [{ id: 1, title: 'secret title' }] }] } });
+    expect(out).toContain('sub_items: 1 rows, fields: id, title');
+    expect(out).toContain('channel #9');
+    expect(out).not.toContain('secret title');
+    expect(describeBody({ data: { id: 32, player: { url: 'x', type: 'video' } } })).toContain('player: object, fields: url, type');
+  });
+});
