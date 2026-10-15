@@ -221,8 +221,7 @@ async function route(req: Request, env: Env): Promise<Response> {
         if (b?.type === 'link') {
           const u = safeUrl(b.url);
           if (!u) return err(400, 'Enter a full https:// link');
-          const id = await contributeLink(env, s, { url: u, title, description, thumbnail: safeUrl(b.thumbnail) ?? undefined, channels });
-          return json({ id }, 201);
+          return json(await contributeLink(env, s, { url: u, title, description, thumbnail: safeUrl(b.thumbnail) ?? undefined, channels }), 201);
         }
         if (b?.type === 'file') {
           await logStep(env, s.user_id, 'publish-received', true, undefined, `stored=${!!b.storedName} channels=${channels.join(',')}`);

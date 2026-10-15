@@ -636,6 +636,7 @@
     const description = $('postDesc').value.trim();
     const channels = [...$('postChannels').querySelectorAll('input:checked')].map((x) => Number(x.value));
     if (!title) return void toast('Add a title.');
+    let postResult = {};
     $('postError').hidden = true;
     $('postSubmit').disabled = true;
     try {
@@ -643,7 +644,7 @@
         const url = $('postUrl').value.trim();
         if (!/^https:\/\//.test(url)) throw new Error('Enter a full https:// link.');
         $('postSubmit').textContent = 'Publishing';
-        await api('/api/contribute', { method: 'POST', body: JSON.stringify({ type: 'link', url, title, description, thumbnail: linkThumb, channels }) });
+        postResult = await api('/api/contribute', { method: 'POST', body: JSON.stringify({ type: 'link', url, title, description, thumbnail: linkThumb, channels }) });
       } else {
         const f = $('postFile').files[0];
         if (!f) throw new Error('Choose a file to upload.');
@@ -652,13 +653,12 @@
         $('postSubmit').textContent = 'Uploading';
         const storedName = await uploadFile(f);
         $('postSubmit').textContent = 'Publishing';
-        const r = await api('/api/contribute', { method: 'POST', body: JSON.stringify({ type: 'file', storedName, originalName: f.name, mime: f.type, title, description, channels }) });
-        if (r.channelErrors) toast(`Shared, but some channels refused it: ${r.channelErrors}`);
+        postResult = await api('/api/contribute', { method: 'POST', body: JSON.stringify({ type: 'file', storedName, originalName: f.name, mime: f.type, title, description, channels }) });
       }
       closePanel($('postSheet'));
-      toast(postTab === 'link'
-        ? 'Shared to Docebo. It appears in the channels once published (some channels need expert approval).'
-        : 'Uploaded to Docebo. Videos take a few minutes to process, and some channels need expert approval.');
+      if (postResult.channelErrors) toast(`Shared, but some channels refused it: ${postResult.channelErrors}`);
+      else if (!postResult.published) toast('Saved in Docebo as a draft, but Docebo did not let you publish it. Open it in My Channel to publish.');
+      else toast(`Published to Docebo.${postTab === 'file' || postTab === 'upload' ? ' Videos take a few minutes to process.' : ''} Channels that need expert review show it once an expert approves it.`);
     } catch (err) {
       $('postError').hidden = false;
       $('postError').textContent = err.message;

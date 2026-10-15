@@ -288,7 +288,7 @@ export async function linkMeta(env: Env, s: Session, url: string): Promise<{ tit
 const VIDEO_HOSTS = /(^|\.)(youtube\.com|youtu\.be|vimeo\.com|wistia\.(com|net))$/i;
 
 /** Publish a link: YouTube/Vimeo/Wistia become video links (playable in Docebo), anything else a web link. */
-export async function contributeLink(env: Env, s: Session, a: { url: string; title: string; description: string; thumbnail?: string; channels: number[] }): Promise<number | undefined> {
+export async function contributeLink(env: Env, s: Session, a: { url: string; title: string; description: string; thumbnail?: string; channels: number[] }): Promise<{ id?: number; published: boolean }> {
   if (!live(env, s)) throw new DoceboError(400, 'Contributing needs live mode');
   const host = new URL(a.url).hostname;
   const path = VIDEO_HOSTS.test(host) ? '/share/v1/videolink' : '/share/v1/link';
@@ -301,7 +301,10 @@ export async function contributeLink(env: Env, s: Session, a: { url: string; tit
   });
   const item = (dataOf(j).item ?? {}) as Json;
   const id = Number(item.id ?? item.id_asset);
-  return Number.isFinite(id) ? id : undefined;
+  await logStep(env, s.user_id, 'link-create', Number.isFinite(id), 200, `id=${id}`);
+  if (!Number.isFinite(id) || id <= 0) return { published: false };
+  const pub = await publishAsset(env, s, id);
+  return { id, published: pub.published };
 }
 
 /** Docebo asset content types (POST /share/v1/assets). */
@@ -367,8 +370,24 @@ export async function uploadToDocebo(env: Env, s: Session, filename: string, mim
   return stored;
 }
 
+/**
+ * Docebo creates contributed assets as drafts; its own upload flow ends with "Publish"
+ * (PUT /share/v1/publish/{id}). Channels that need expert review then hold it for approval.
+ */
+export async function publishAsset(env: Env, s: Session & { access_token: string }, id: number): Promise<{ published: boolean; rights: boolean }> {
+  try {
+    const d = dataOf(await doceboCall(env, s.access_token, 'PUT', `/share/v1/publish/${id}`));
+    const r = { published: d.published === true || d.published === 1, rights: d.publishing_rights !== false };
+    await logStep(env, s.user_id, 'publish', true, 200, JSON.stringify(r));
+    return r;
+  } catch (e) {
+    await logStep(env, s.user_id, 'publish', false, (e as DoceboError).status, (e as Error).message);
+    return { published: false, rights: false };
+  }
+}
+
 /** Create the asset for an uploaded file, then place it in the chosen channels. */
-export async function contributeFile(env: Env, s: Session, a: { storedName: string; originalName: string; mime: string; title: string; description: string; channels: number[] }): Promise<{ id: number; channelErrors?: string }> {
+export async function contributeFile(env: Env, s: Session, a: { storedName: string; originalName: string; mime: string; title: string; description: string; channels: number[] }): Promise<{ id: number; channelErrors?: string; published: boolean }> {
   if (!live(env, s)) throw new DoceboError(400, 'Contributing needs live mode');
   const j = await doceboCall(env, s.access_token, 'POST', '/share/v1/assets', {
     original_file_name: a.originalName,
@@ -399,5 +418,6 @@ export async function contributeFile(env: Env, s: Session, a: { storedName: stri
       await logStep(env, s.user_id, 'channels', false, (e as DoceboError).status, channelErrors);
     }
   }
-  return { id, channelErrors };
+  const pub = await publishAsset(env, s, id);
+  return { id, channelErrors, published: pub.published };
 }
