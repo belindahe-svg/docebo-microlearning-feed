@@ -26,6 +26,23 @@
   let cur = -1;
   let muted = true;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Where the feed is running. On the web LMS it sits inside Docebo's iFrame widget. In the
+  // Go.Learn app the widget page is shown in an in-app web view, where Docebo's web pages do not
+  // load ("Please upgrade your browser"), so content must open through Go.Learn's own app links.
+  const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const inGoLearn = /golearn|go\.learn/i.test(navigator.userAgent) || (!framed && touch)
+    || new URLSearchParams(location.search).get('app') === 'golearn';
+
+  // Go.Learn app links, from Docebo's deep-link reference.
+  function openUrl(it) {
+    if (!inGoLearn) return it.doceboUrl;
+    const id = encodeURIComponent(it.id);
+    if (it.kind === 'course') return `golearn://course/${id}`;
+    if (it.kind === 'learning_plan') return `golearn://lp/${id}`;
+    return `golearn://asset/view/${id}`;
+  }
   const PROGRESS_STEPS = [25, 50, 75, 90, 100];
   const PALETTE = [
     ['#4a2a85', '#1f6f8b'], ['#7a3b15', '#c06a2b'], ['#23445f', '#3f8f8a'], ['#3a2255', '#8a4a7a'],
@@ -70,6 +87,11 @@
     startSession.receivedParams = s.receivedParams || [];
     // The auth code is single-use; remove it from the address so it is never reused or logged.
     if (location.search) history.replaceState(null, '', location.pathname);
+    api('/api/client-info', { method: 'POST', body: JSON.stringify({
+      ua: navigator.userAgent, framed, touch, inGoLearn,
+      vw: innerWidth, vh: innerHeight, sw: screen.width, sh: screen.height, dpr: devicePixelRatio,
+      vvh: window.visualViewport ? Math.round(visualViewport.height) : null,
+    }) }).catch(() => {});
   }
 
   // ---------- rendering ----------
@@ -88,7 +110,7 @@
   }
 
   function ctaLabel(it) {
-    if (it.kind === 'asset') return 'Open in Docebo';
+    if (it.kind === 'asset') return inGoLearn ? 'Open' : 'Open in Docebo';
     if (/progress/i.test(it.status || '')) return 'Resume in Docebo';
     if (/complet/i.test(it.status || '')) return 'Review in Docebo';
     return 'Start in Docebo';
@@ -114,7 +136,7 @@
         ${it.description ? `<p class="desc${rich ? ' long' : ''}">${esc(it.description)}</p>` : ''}
         ${lp}
         ${progress}
-        <a class="cta" href="${esc(it.doceboUrl)}" target="_top">${ctaLabel(it)}</a>${it.myStatus?.canDelete ? '<button type="button" class="delmine">Delete</button>' : ''}
+        <a class="cta" href="${esc(openUrl(it))}" target="${inGoLearn ? '_self' : '_top'}">${ctaLabel(it)}</a>${it.myStatus?.canDelete ? '<button type="button" class="delmine">Delete</button>' : ''}
       `;
   }
 

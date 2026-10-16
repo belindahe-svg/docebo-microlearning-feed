@@ -176,6 +176,13 @@ async function route(req: Request, env: Env): Promise<Response> {
 
   if (path === '/api/feed' && req.method === 'GET') return handleFeed(env, s);
 
+  // Device and container info (no personal data) to tune behaviour on the web vs Go.Learn.
+  if (path === '/api/client-info' && req.method === 'POST') {
+    const b = await readJson<Record<string, unknown>>(req);
+    await logStep(env, s.user_id, 'client', true, undefined, JSON.stringify(b ?? {}).slice(0, 480));
+    return json({ ok: true });
+  }
+
   if (path === '/api/discover' && req.method === 'GET') {
     if (!isDiscoveryUser(env, s.user_id, s.username)) return err(403, 'Discovery is not enabled for this user');
     if (!s.access_token) return err(400, 'Discovery needs live mode (a real Docebo session)');
