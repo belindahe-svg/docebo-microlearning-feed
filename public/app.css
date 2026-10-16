@@ -190,5 +190,3 @@ html,body{overflow:hidden}
 .card .vbg{display:none}
 .card.landscape .vbg{display:block;position:absolute;inset:-30px;background:#111 center/cover no-repeat;filter:blur(28px) brightness(.5);transform:scale(1.1)}
 .card.landscape video{object-fit:contain;object-position:center 40%;background:transparent}
-.linktest{min-height:0;padding-bottom:6px}
-.ltbtn{display:block;margin:0 0 8px;padding:12px 14px;border-radius:12px;background:#2a2433;color:#fff;text-decoration:none;font-size:14px;font-weight:600}
