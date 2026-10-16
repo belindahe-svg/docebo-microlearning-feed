@@ -16,6 +16,7 @@ import {
   contributeLink,
   createPlaylistWith,
   deleteMyAsset,
+  isDoceboUploadUrl,
   learnDetails,
   linkMeta,
   logStep,
@@ -260,9 +261,10 @@ async function route(req: Request, env: Env): Promise<Response> {
           return json(await contributeLink(env, s, { url: u, title, description, thumbnail: safeUrl(b.thumbnail) ?? undefined, channels }), 201);
         }
         if (b?.type === 'file') {
-          await logStep(env, s.user_id, 'publish-received', true, undefined, `stored=${!!b.storedName} channels=${channels.join(',')}`);
-          if (!b.storedName || !/^[\w.-]+$/.test(b.storedName)) return err(400, 'Upload the file first');
-          return json(await contributeFile(env, s, { storedName: b.storedName, originalName: (b.originalName ?? b.storedName).slice(0, 200), mime: b.mime ?? '', title, description, channels }), 201);
+          await logStep(env, s.user_id, 'publish-received', true, undefined, `upload=${!!b.storedName} channels=${channels.join(',')}`);
+          if (!isDoceboUploadUrl(b.storedName)) return err(400, 'Upload the file first');
+          const originalName = (b.originalName ?? 'file').replace(/[\r\n]/g, ' ').slice(0, 200);
+          return json(await contributeFile(env, s, { uploadUrl: b.storedName, originalName, mime: b.mime ?? '', title, description, channels }), 201);
         }
         return err(400, 'Unknown contribution type');
       }

@@ -32,3 +32,18 @@ describe('Docebo HTML descriptions', () => {
       .toBe('Our anti-corruption training provides the skillset.\nOne\nTwo & three');
   });
 });
+
+import { isDoceboUploadUrl, subfolderFor } from '../src/social';
+describe('Docebo upload flow', () => {
+  it('uses the subfolders of Docebo\'s own upload screen', () => {
+    expect(subfolderFor(1)).toBe('video');
+    expect(subfolderFor(7)).toBe('images');
+    expect(subfolderFor(5)).toBe('pdf');
+    expect(subfolderFor(10)).toBe('other');
+  });
+  it('only accepts upload URLs on Docebo storage', () => {
+    expect(isDoceboUploadUrl('https://lmsfiles.s3.eu-west-1.amazonaws.com/files/a/t/x/app7020/video/h.mp4?X-Amz-Signature=1')).toBe(true);
+    expect(isDoceboUploadUrl('https://evil.example.com/app7020/h.mp4')).toBe(false);
+    expect(isDoceboUploadUrl('h.mp4')).toBe(false);
+  });
+});

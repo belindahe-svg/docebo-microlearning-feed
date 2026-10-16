@@ -307,6 +307,21 @@ export async function contributeLink(env: Env, s: Session, a: { url: string; tit
   return { id, published: pub.published };
 }
 
+/** Storage subfolder Docebo's own upload screen uses for each content type. */
+export function subfolderFor(contentType: number): string {
+  return ({ 1: 'video', 7: 'images', 5: 'pdf', 4: 'ppt', 2: 'doc', 3: 'excel', 6: 'text', 12: 'audio' } as Record<number, string>)[contentType] ?? 'other';
+}
+
+/** Only accept upload URLs that point at Docebo's own file storage. */
+export function isDoceboUploadUrl(v: unknown): v is string {
+  try {
+    const u = new URL(String(v));
+    return u.protocol === 'https:' && /\.amazonaws\.com$/.test(u.hostname) && u.pathname.includes('/app7020/');
+  } catch {
+    return false;
+  }
+}
+
 /** Docebo asset content types (POST /share/v1/assets). */
 export function contentTypeFor(mime: string, filename: string): number {
   const m = mime.toLowerCase();
@@ -331,7 +346,8 @@ export function contentTypeFor(mime: string, filename: string): number {
 export async function uploadToDocebo(env: Env, s: Session, filename: string, mime: string, body: ReadableStream | null, length: string | null): Promise<string> {
   if (!live(env, s)) throw new DoceboError(400, 'Uploading needs live mode');
   if (!body) throw new DoceboError(400, 'No file received');
-  const q = new URLSearchParams({ filename, mime, collection: 'app7020' });
+  // Same request as Docebo's own "Share content" screen: collection app7020 plus a per-type subfolder.
+  const q = new URLSearchParams({ operation: 'write', filename, mime, collection: 'app7020', subfolder: subfolderFor(contentTypeFor(mime, filename)) });
   let d: Json;
   try {
     d = dataOf(await doceboCall(env, s.access_token, 'GET', `/manage/v1/upload/presigned_url?${q}`));
@@ -367,7 +383,8 @@ export async function uploadToDocebo(env: Env, s: Session, filename: string, mim
     throw new DoceboError(502, `Upload to Docebo storage failed (${res.status}${code ? ` ${code}` : ''})`);
   }
   await logStep(env, s.user_id, 's3-put', true, res.status, `len=${length}`);
-  return stored;
+  // Docebo's contribution calls take the upload URL itself (as returned by presigned_url).
+  return url.startsWith('//') ? `https:${url}` : url;
 }
 
 /**
@@ -386,37 +403,36 @@ export async function publishAsset(env: Env, s: Session & { access_token: string
   }
 }
 
-/** Create the asset for an uploaded file, then place it in the chosen channels. */
-export async function contributeFile(env: Env, s: Session, a: { storedName: string; originalName: string; mime: string; title: string; description: string; channels: number[] }): Promise<{ id: number; channelErrors?: string; published: boolean }> {
+/**
+ * Create the contribution exactly as Docebo's "Share content" screen does: POST to the type-specific
+ * endpoint with the upload URL (this is what triggers video conversion and thumbnails), then set the
+ * channels with PUT /share/v1/assets/{id} {channels, is_private: 0, is_create: true}.
+ * (A bare POST /share/v1/assets record skips conversion: the video never plays.)
+ */
+export async function contributeFile(env: Env, s: Session, a: { uploadUrl: string; originalName: string; mime: string; title: string; description: string; channels: number[] }): Promise<{ id: number; channelErrors?: string; published: boolean }> {
   if (!live(env, s)) throw new DoceboError(400, 'Contributing needs live mode');
-  const j = await doceboCall(env, s.access_token, 'POST', '/share/v1/assets', {
-    original_file_name: a.originalName,
-    file_name: a.storedName,
-    content_type: contentTypeFor(a.mime, a.originalName),
-    id_source: 1,
-    is_private: 0,
-    title: a.title,
-    description: a.description,
-    tags: [],
-    skill_codes: [],
-  }).catch(async (e) => {
-    await logStep(env, s.user_id, 'asset-create', false, (e as DoceboError).status, (e as Error).message);
+  const ct = contentTypeFor(a.mime, a.originalName);
+  const endpoint = ct === 1 ? '/share/v1/video' : ct === 7 ? '/share/v1/image' : [2, 3, 4, 5].includes(ct) ? '/share/v1/document' : '/share/v1/generic';
+  const body: Json = { url: a.uploadUrl, original_filename: a.originalName, title: a.title, description: a.description || a.title, channels: [], tags: [] };
+  if (endpoint === '/share/v1/generic') body.content_type = ct === 6 ? 6 : 10;
+  const j = await doceboCall(env, s.access_token, 'POST', endpoint, body).catch(async (e) => {
+    await logStep(env, s.user_id, 'asset-create', false, (e as DoceboError).status, `${endpoint} ${(e as Error).message}`);
     throw e;
   });
-  const id = Number(dataOf(j).id);
-  await logStep(env, s.user_id, 'asset-create', Number.isFinite(id) && id > 0, 200, `id=${id} body=${JSON.stringify(j).slice(0, 200)}`);
+  const item = (dataOf(j).item ?? dataOf(j)) as Json;
+  const id = Number(item.id ?? item.id_asset ?? item.content_id);
+  await logStep(env, s.user_id, 'asset-create', Number.isFinite(id) && id > 0, 200, `${endpoint} id=${id} body=${JSON.stringify(j).slice(0, 200)}`);
   if (!Number.isFinite(id) || id <= 0) throw new DoceboError(502, 'Docebo did not return the new asset');
+
   let channelErrors: string | undefined;
-  if (a.channels.length) {
-    try {
-      const r = dataOf(await doceboCall(env, s.access_token, 'PUT', `/share/v1/assets/${id}/channels`, { channels: a.channels }));
-      const errs = r.errors;
-      if (errs && (Array.isArray(errs) ? errs.length : Object.keys(errs as Json).length)) channelErrors = JSON.stringify(errs).slice(0, 200);
-      await logStep(env, s.user_id, 'channels', !channelErrors, 200, `${a.channels.join(',')} ${channelErrors ?? JSON.stringify(r).slice(0, 150)}`);
-    } catch (e) {
-      channelErrors = (e as Error).message;
-      await logStep(env, s.user_id, 'channels', false, (e as DoceboError).status, channelErrors);
-    }
+  try {
+    const r = await doceboCall(env, s.access_token, 'PUT', `/share/v1/assets/${id}`, { channels: a.channels, is_private: 0, is_create: true });
+    const errs = dataOf(r).errors;
+    if (errs && (Array.isArray(errs) ? errs.length : Object.keys(errs as Json).length)) channelErrors = JSON.stringify(errs).slice(0, 200);
+    await logStep(env, s.user_id, 'channels', !channelErrors, 200, `${a.channels.join(',')} ${JSON.stringify(r).slice(0, 180)}`);
+  } catch (e) {
+    channelErrors = (e as Error).message;
+    await logStep(env, s.user_id, 'channels', false, (e as DoceboError).status, channelErrors);
   }
   const pub = await publishAsset(env, s, id);
   return { id, channelErrors, published: pub.published };
