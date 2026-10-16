@@ -205,6 +205,7 @@ export function absUrl(u: unknown): string | undefined {
 export interface AssetMedia {
   youtubeId?: string;
   videoUrl?: string;      // direct file or HLS stream for uploaded videos
+  imageUrl?: string;      // full-size picture for image assets (player_type "image")
   thumbnailUrl?: string;
   subtype?: string;
 }
@@ -256,14 +257,20 @@ export function assetMediaFrom(body: unknown): AssetMedia {
         .filter((u) => VIDEO_EXT.test(u) || nameLooksVideo || /video|media|flowplayer/.test(playerType))
     : [];
   const direct = candidates.find((u) => /\.(mp4|m4v|webm)(\?|#|$)/i.test(u)) ?? candidates[0];
-  const subtype = youtubeId || direct || /vimeo|wistia|\.mp4|\.m3u8/i.test(urls.join(' '))
+  // Image assets (confirmed on atalentdemo2): player_type "image", full picture in sources[0].url.
+  const imageUrl = playerType === 'image'
+    ? sources.map((x) => absUrl(x?.url ?? x?.src)).find((u) => !!u && /^https:\/\//.test(u))
+    : undefined;
+  const subtype = imageUrl
+    ? 'Image'
+    : youtubeId || direct || /vimeo|wistia|\.mp4|\.m3u8/i.test(urls.join(' '))
     ? 'Video'
     : playerType.includes('link')
       ? 'Link'
       : config.total_pages
         ? 'Document'
         : undefined;
-  return { youtubeId, videoUrl: direct, thumbnailUrl, subtype };
+  return { youtubeId, videoUrl: imageUrl ? undefined : direct, imageUrl, thumbnailUrl, subtype };
 }
 
 // Per-isolate cache: asset media rarely changes, and this keeps repeat scrolls off the Docebo API.

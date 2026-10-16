@@ -277,6 +277,30 @@
     card.classList.add('rich');
   }
 
+  // Image assets: the whole picture, fitted to the card (no cropping) over a blurred copy of itself,
+  // so any shape works on any screen. Tapping opens it full screen with pinch-zoom for detail.
+  function showPicture(card, it) {
+    card.classList.add('pic');
+    const art = card.querySelector('.art');
+    if (!art) return;
+    art.innerHTML = `<div class="picbg" style="background-image:url('${esc(it.imageUrl)}')"></div>
+      <img class="picfull" alt="${esc(it.title)}" src="${esc(it.imageUrl)}" decoding="async">`;
+  }
+
+  function openLightbox(it) {
+    const box = document.createElement('div');
+    box.className = 'lightbox';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', it.title);
+    box.innerHTML = `<button type="button" class="lbclose" aria-label="Close">×</button>
+      <div class="lbscroll"><img alt="${esc(it.title)}" src="${esc(it.imageUrl)}"></div>`;
+    const close = () => { box.remove(); feedEl.focus({ preventScroll: true }); };
+    box.querySelector('.lbclose').addEventListener('click', close);
+    box.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    stageEl.appendChild(box);
+    box.querySelector('.lbclose').focus({ preventScroll: true });
+  }
+
   // Swap a rendered card for a fresh one (e.g. once we learn it is a playable video).
   function replaceCard(i) {
     const old = cards[i];
@@ -305,6 +329,7 @@
     if (m.subtype) it.subtype = m.subtype;
     if (m.thumbnailUrl && !it.thumbnailUrl) it.thumbnailUrl = m.thumbnailUrl;
     if (m.youtubeId && !it.videoUrl) it.youtubeId = m.youtubeId;
+    if (m.imageUrl) it.imageUrl = m.imageUrl;
     const idx = items.indexOf(it);
     if (m.videoUrl && !it.videoUrl) {
       it.videoUrl = m.videoUrl;
@@ -319,6 +344,7 @@
     if (rateBtn) { rateBtn.querySelector('span').textContent = rateLabel(it); rateBtn.setAttribute('aria-pressed', String(!!it.myRating)); }
     const chip = card.querySelector('.chips .kind');
     if (chip) chip.textContent = kindLabel(it);
+    if (it.imageUrl && !card.classList.contains('pic')) showPicture(card, it);
     const art = card.querySelector('.art');
     if (art && it.thumbnailUrl && !art.querySelector('img')) {
       art.insertAdjacentHTML('afterbegin', `<img alt="" src="${esc(it.thumbnailUrl)}">`);
@@ -779,6 +805,7 @@
     if (e.target.closest('.delmine')) return void deleteMine(it);
     if (e.target.closest('.mute')) return void setMuted(!muted);
     if (e.target.closest('a')) return;
+    if (it.imageUrl) return void openLightbox(it);
     togglePlay(card);
   });
   feedEl.addEventListener('keydown', (e) => {

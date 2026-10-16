@@ -132,3 +132,14 @@ describe('protocol-relative Docebo CDN links (real asset #75 shape)', () => {
     expect(m.thumbnailUrl).toBe('https://cdn1.dcbstatic.com/t/c.jpg');
   });
 });
+
+describe('image assets (confirmed shape, asset #84)', () => {
+  it('returns the full picture and labels it Image', () => {
+    const m = assetMediaFrom({ data: { player: { player_type: 'image', content: {
+      name_original: 'IMG_6929.png', sources: [{ url: '//cdn1.dcbstatic.com/files/x/app7020/images/h.png' }],
+      thumbnail: { cover: '//cdn1.dcbstatic.com/t/c.jpg' } } } } });
+    expect(m.imageUrl).toBe('https://cdn1.dcbstatic.com/files/x/app7020/images/h.png');
+    expect(m.subtype).toBe('Image');
+    expect(m.videoUrl).toBeUndefined();
+  });
+});
