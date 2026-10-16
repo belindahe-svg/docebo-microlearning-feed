@@ -114,6 +114,10 @@ Endpoints come from the instance's own API spec (`/share/v1/swagger`, `/learn/v1
 
 **+ Share content** (top bar): Docebo's contribute flow. Links use `POST /share/v1/link` (or `/share/v1/videolink` for YouTube, Vimeo, Wistia) with `/share/v1/link/meta` for the preview. Files: the Worker gets a presigned URL (`GET /manage/v1/upload/presigned_url`, collection `app7020`), streams the upload to it (up to 95 MB), then `POST /share/v1/assets` and `PUT /share/v1/assets/{id}/channels`. Channel upload permissions and expert review are Docebo's.
 
+## Later phase
+
+- **Course comments via Docebo course discussions.** Confirmed working on atalentdemo2 (read-only): `GET /learn/v1/forum/getForumData?course_id={id}` lists a course's forums (`ID`, `FORUM`, `DISCUSSIONS`, `POSTS`); `GET /learn/v1/courses/{id}/comments?forum_id={ID}` returns threads; replies via `PUT /learn/v1/courses/{id}/comments/thread/{thread_id}/message {content}`. Not built yet because no course on the demo platform has discussions (course 5 has an empty "Comments" forum). Needs: a course with a discussion forum, and confirming how a learner starts a new thread.
+
 ## Security notes
 
 - The hash is checked with a constant-time comparison; the auth code is removed from the address bar right after the handshake.
