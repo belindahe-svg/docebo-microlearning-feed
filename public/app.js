@@ -35,13 +35,18 @@
   const inGoLearn = /golearn|go\.learn/i.test(navigator.userAgent) || (!framed && touch)
     || new URLSearchParams(location.search).get('app') === 'golearn';
 
-  // Go.Learn app links, from Docebo's deep-link reference.
+  // Go.Learn app links, from Docebo's deep-link reference. The domain parameter (Base64 of the
+  // platform host) is required: without it Go.Learn uses whatever platform URL it saved last, which
+  // can be a different platform and shows a sign-in page that rejects the learner's credentials.
   function openUrl(it) {
     if (!inGoLearn) return it.doceboUrl;
     const id = encodeURIComponent(it.id);
-    if (it.kind === 'course') return `golearn://course/${id}`;
-    if (it.kind === 'learning_plan') return `golearn://lp/${id}`;
-    return `golearn://asset/view/${id}`;
+    let host = '';
+    try { host = new URL(it.doceboUrl).host; } catch { /* no host: link without domain */ }
+    const q = host ? `?domain=${encodeURIComponent(btoa(host))}` : '';
+    if (it.kind === 'course') return `golearn://course/${id}${q}`;
+    if (it.kind === 'learning_plan') return `golearn://lp/${id}${q}`;
+    return `golearn://asset/view/${id}${q}`;
   }
   const PROGRESS_STEPS = [25, 50, 75, 90, 100];
   const PALETTE = [
