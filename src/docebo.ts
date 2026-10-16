@@ -206,6 +206,7 @@ export interface AssetMedia {
   youtubeId?: string;
   videoUrl?: string;      // direct file or HLS stream for uploaded videos
   imageUrl?: string;      // full-size picture for image assets (player_type "image")
+  qaEnabled?: boolean;    // the asset's Q&A switch (enable_sl_qa and not disable_qa)
   thumbnailUrl?: string;
   subtype?: string;
 }
@@ -270,7 +271,8 @@ export function assetMediaFrom(body: unknown): AssetMedia {
       : config.total_pages
         ? 'Document'
         : undefined;
-  return { youtubeId, videoUrl: imageUrl ? undefined : direct, imageUrl, thumbnailUrl, subtype };
+  const qaEnabled = d.enable_sl_qa === undefined ? undefined : d.enable_sl_qa !== false && d.disable_qa !== true;
+  return { youtubeId, videoUrl: imageUrl ? undefined : direct, imageUrl, thumbnailUrl, subtype, qaEnabled };
 }
 
 // Per-isolate cache: asset media rarely changes, and this keeps repeat scrolls off the Docebo API.

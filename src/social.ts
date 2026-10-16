@@ -508,6 +508,11 @@ export interface LearnDetails {
   courses?: string[];         // course names inside a learning plan
   courseCount?: number;
   thumbnailUrl?: string;
+  avgRating?: number;         // Docebo average rating (courses)
+  ratingsCount?: number;
+  myRating?: number;          // the learner's own rating, 0 = not rated
+  canRate?: boolean;
+  questions?: number;         // Docebo Q&A questions on the course
 }
 
 /** Plain text from Docebo's HTML descriptions. */
@@ -550,11 +555,22 @@ export async function learnDetails(env: Env, s: Session, kind: string, id: strin
     ].filter(Boolean) as string[];
     const st = String(d.status ?? '').toLowerCase();
     const bg = (d.background_image as Json)?.url;
+    const ratingsCount = Number(d.ratings_count) || 0;
+    // The learner's own rating is only on /rating, which errors for courses with no ratings yet.
+    const [mine, qCount] = await Promise.all([
+      d.is_rated ? doceboCall(env, s.access_token, 'GET', `/learn/v1/courses/${encodeURIComponent(id)}/rating`).then((r) => Number(dataOf(r).my_rating) || 0).catch(() => 0) : Promise.resolve(0),
+      countQuestions(env, s.access_token, 'course', id),
+    ]);
     return {
       description: htmlToText(d.description) || htmlToText(d.short_description) || undefined,
       facts,
       status: STATUS_LABELS[st] ?? (st ? st.replace(/_/g, ' ') : undefined),
       thumbnailUrl: typeof bg === 'string' && bg ? (bg.startsWith('//') ? `https:${bg}` : bg) : undefined,
+      avgRating: ratingsCount ? Number(d.current_rating) || 0 : undefined,
+      ratingsCount,
+      myRating: mine,
+      canRate: d.can_rate !== false,
+      questions: qCount,
     };
   }
   if (kind === 'learning_plan') {
@@ -579,4 +595,100 @@ export async function learnDetails(env: Env, s: Session, kind: string, id: strin
     };
   }
   return { facts: [] };
+}
+
+// ---------- Docebo Q&A (courses and assets) ----------
+// GET /share/v1/questions?id_course= | id_asset=  (course Q&A is attached to items inside the course;
+// related.title names that item), GET /share/v1/questions/{id}/answers,
+// POST /share/v1/questions {title, id_course | id_asset}, POST /share/v1/questions/{id}/answer {content}.
+
+export interface QaQuestion {
+  id: number;
+  text: string;
+  author: string;
+  mine: boolean;
+  createdAt: number;
+  answers: number;
+  on?: string;          // course item the question is attached to
+  canReply: boolean;
+  best?: string;        // best answer text, when marked
+}
+
+export interface QaAnswer {
+  id: number;
+  text: string;
+  author: string;
+  mine: boolean;
+  createdAt: number;
+  best: boolean;
+}
+
+const qaParam = (kind: string) => (kind === 'course' ? 'id_course' : 'id_asset');
+
+export async function countQuestions(env: Env, token: string, kind: string, id: string): Promise<number | undefined> {
+  try {
+    const j = await doceboCall(env, token, 'GET', `/share/v1/questions?${qaParam(kind)}=${encodeURIComponent(id)}&page_size=200`);
+    return itemsOf(j).length;
+  } catch {
+    return undefined;
+  }
+}
+
+function toHtml(text: string): string {
+  const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return esc.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+}
+
+export async function listQuestions(env: Env, s: Session, kind: string, id: string): Promise<QaQuestion[]> {
+  if (!live(env, s)) return [];
+  const j = await doceboCall(env, s.access_token, 'GET',
+    `/share/v1/questions?${qaParam(kind)}=${encodeURIComponent(id)}&page_size=100&sort_by=date&sort_by_direction=desc`);
+  return itemsOf(j).map((q) => {
+    const owner = (q.owner ?? {}) as Json;
+    const meta = (q.metadata ?? {}) as Json;
+    const related = (q.related ?? {}) as Json;
+    const best = q.best as Json | null;
+    return {
+      id: Number(q.id),
+      text: htmlToText(q.title),
+      author: String(owner.full_name ?? owner.short_name ?? 'Learner'),
+      mine: String(owner.id ?? '') === String(s.user_id),
+      createdAt: toUnix(meta.created_at),
+      answers: Number(meta.total_items) || 0,
+      on: meta.related_kind === 'learning_object' && related.title ? String(related.title) : undefined,
+      canReply: meta.can_reply !== false,
+      best: best && (best.title || best.content) ? htmlToText(best.title ?? best.content) : undefined,
+    };
+  }).filter((q) => Number.isFinite(q.id));
+}
+
+export async function listAnswers(env: Env, s: Session, questionId: string): Promise<QaAnswer[]> {
+  if (!live(env, s)) return [];
+  const j = await doceboCall(env, s.access_token, 'GET',
+    `/share/v1/questions/${encodeURIComponent(questionId)}/answers?page_size=50&sort_attr=date&sort_dir=asc`);
+  return itemsOf(j).map((a) => {
+    const owner = (a.owner ?? {}) as Json;
+    return {
+      id: Number(a.id),
+      text: htmlToText(a.title ?? a.content),
+      author: String(owner.full_name ?? owner.short_name ?? 'Learner'),
+      mine: String(owner.id ?? '') === String(s.user_id),
+      createdAt: toUnix(a.created_at),
+      best: a.is_best === true || a.is_best === 1,
+    };
+  });
+}
+
+export async function askQuestion(env: Env, s: Session, kind: string, id: string, text: string): Promise<QaQuestion> {
+  if (!live(env, s)) throw new DoceboError(400, 'Q&A needs live mode');
+  const j = await doceboCall(env, s.access_token, 'POST', '/share/v1/questions', { title: toHtml(text), [qaParam(kind)]: Number(id) });
+  const d = dataOf(j);
+  return { id: Number(d.id), text, author: s.username, mine: true, createdAt: Math.floor(Date.now() / 1000), answers: 0, canReply: true };
+}
+
+export async function answerQuestion(env: Env, s: Session, questionId: string, text: string): Promise<QaAnswer> {
+  if (!live(env, s)) throw new DoceboError(400, 'Q&A needs live mode');
+  const j = await doceboCall(env, s.access_token, 'POST', `/share/v1/questions/${encodeURIComponent(questionId)}/answer`, { content: toHtml(text), is_best: 0 });
+  const d = dataOf(j);
+  return { id: Number(d.id), text, author: s.username, mine: true, createdAt: Math.floor(Date.now() / 1000), best: false };
 }

@@ -15,7 +15,12 @@ import {
   contributeFile,
   contributeLink,
   createPlaylistWith,
+  answerQuestion,
+  askQuestion,
+  countQuestions,
   deleteMyAsset,
+  listAnswers,
+  listQuestions,
   isDoceboUploadUrl,
   learnDetails,
   linkMeta,
@@ -194,12 +199,13 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (assetMedia && req.method === 'GET') {
     try {
       const id = assetMedia[1];
-      const [media, rating, comments] = await Promise.all([
+      const [media, rating, comments, questions] = await Promise.all([
         getAssetMedia(env, s.access_token, id),
         s.access_token && env.DOCEBO_MODE === 'live' ? getAssetRating(env, s.access_token, id) : undefined,
         s.access_token && env.DOCEBO_MODE === 'live' ? countAssetComments(env, s.access_token, id) : undefined,
+        s.access_token && env.DOCEBO_MODE === 'live' ? countQuestions(env, s.access_token, 'asset', id) : undefined,
       ]);
-      return json({ ...media, myRating: rating?.rating, canRate: rating?.canRate, comments });
+      return json({ ...media, myRating: rating?.rating, canRate: rating?.canRate, comments, questions });
     } catch (e) {
       return err(502, (e as Error).message);
     }
@@ -275,6 +281,23 @@ async function route(req: Request, env: Env): Promise<Response> {
     return err(404, 'Not found');
   }
 
+  // Docebo Q&A answers
+  const qa = /^\/api\/questions\/(\d+)\/answers$/.exec(path);
+  if (qa) {
+    try {
+      if (req.method === 'GET') return json({ answers: await listAnswers(env, s, qa[1]) });
+      if (req.method === 'POST') {
+        const b = await readJson<{ text?: string }>(req);
+        const text = (b?.text ?? '').trim();
+        if (!text) return err(400, 'Write an answer first');
+        if (text.length > 2000) return err(400, 'Answers are limited to 2000 characters');
+        return json({ answer: await answerQuestion(env, s, qa[1], text) }, 201);
+      }
+    } catch (e) {
+      return doceboErr(e);
+    }
+  }
+
   const delComment = /^\/api\/comments\/(d?)(\d+)$/.exec(path);
   if (delComment && req.method === 'DELETE') {
     if (delComment[1] === 'd') {
@@ -288,7 +311,7 @@ async function route(req: Request, env: Env): Promise<Response> {
     return (await deleteOwnComment(env, Number(delComment[2]), s.user_id)) ? json({ ok: true }) : err(404, 'Comment not found');
   }
 
-  const m = /^\/api\/items\/([^/]+)\/(like|save|comments|progress|rating|invite|playlists|playlists\/new|details)$/.exec(path);
+  const m = /^\/api\/items\/([^/]+)\/(like|save|comments|progress|rating|invite|playlists|playlists\/new|details|questions)$/.exec(path);
   if (!m) return err(404, 'Not found');
   const key = decodeURIComponent(m[1]);
   if (!ITEM_KEY_RE.test(key)) return err(400, 'Invalid item key');
@@ -310,6 +333,23 @@ async function route(req: Request, env: Env): Promise<Response> {
     const on = b?.on !== false;
     await setFlag(env, 'saves', key, s.user_id, on);
     return json({ saved: on });
+  }
+
+  // Docebo Q&A for courses and assets.
+  if (action === 'questions') {
+    if (kind !== 'course' && kind !== 'asset') return err(400, 'Q&A is available for courses and assets');
+    try {
+      if (req.method === 'GET') return json({ questions: await listQuestions(env, s, kind, itemId) });
+      if (req.method === 'POST') {
+        const b = await readJson<{ text?: string }>(req);
+        const text = (b?.text ?? '').trim();
+        if (!text) return err(400, 'Write a question first');
+        if (text.length > 1000) return err(400, 'Questions are limited to 1000 characters');
+        return json({ question: await askQuestion(env, s, kind, itemId, text) }, 201);
+      }
+    } catch (e) {
+      return doceboErr(e);
+    }
   }
 
   // Course / learning plan details for cards that open in Docebo.

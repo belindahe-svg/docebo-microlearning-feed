@@ -34,6 +34,10 @@
         <b id="sheetTitle">Comments</b><span class="src" id="sheetSrc"></span>
         <button type="button" id="closeSheet" aria-label="Close comments">×</button>
       </header>
+      <div class="sheettabs" id="sheetTabs" role="tablist" hidden>
+        <button type="button" role="tab" class="stab" data-mode="comments" aria-selected="true">Comments</button>
+        <button type="button" role="tab" class="stab" data-mode="qa" aria-selected="false">Q&amp;A</button>
+      </div>
       <ul class="clist" id="clist"></ul>
       <form class="cform" id="cform">
         <input id="cinput" maxlength="1000" placeholder="Add a comment" autocomplete="off" aria-label="Comment">

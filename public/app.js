@@ -135,7 +135,7 @@
     const lp = (it.lpCourses || []).length
       ? `<ol class="lpcourses">${it.lpCourses.slice(0, 3).map((c) => `<li>${esc(c)}</li>`).join('')}${more > 0 ? `<li class="more">and ${more} more</li>` : ''}</ol>` : '';
     return `
-        <div class="chips">${it.myStatus ? `<span class="chip st-${esc(it.myStatus.tone)}">${esc(it.myStatus.label)}</span>` : ''}<span class="chip kind">${esc(kindLabel(it))}</span>${statusChip(it.status)}${it.rating ? `<span class="chip">★ ${esc(it.rating)}</span>` : ''}</div>
+        <div class="chips">${it.myStatus ? `<span class="chip st-${esc(it.myStatus.tone)}">${esc(it.myStatus.label)}</span>` : ''}<span class="chip kind">${esc(kindLabel(it))}</span>${statusChip(it.status)}${it.rating ? `<span class="chip">★ ${esc(Math.round(it.rating * 10) / 10)}${it.ratingsCount ? ` · ${esc(it.ratingsCount)} rating${it.ratingsCount === 1 ? '' : 's'}` : ''}</span>` : ''}</div>
         <p class="ttl">${esc(it.title)}</p>
         ${facts}
         ${it.description ? `<p class="desc${rich ? ' long' : ''}">${esc(it.description)}</p>` : ''}
@@ -261,6 +261,10 @@
   function enrich(i) { enrichItem(items[i]); }
 
   function applyDetails(it, d) {
+    if (d.avgRating !== undefined) { it.rating = d.avgRating; it.ratingsCount = d.ratingsCount; }
+    if (d.myRating !== undefined) it.myRating = d.myRating;
+    if (d.canRate !== undefined) it.canRate = d.canRate;
+    if (typeof d.questions === 'number') { it.questions = d.questions; it.engagement.comments = d.questions; }
     if (d.description) it.description = d.description;
     it.facts = d.facts || [];
     if (d.status) it.status = d.status;
@@ -275,6 +279,10 @@
     }
     card.querySelector('.meta').innerHTML = metaInner(it);
     card.classList.add('rich');
+    const comSpan = card.querySelector('.com span');
+    if (comSpan) comSpan.textContent = it.engagement.comments;
+    const rateBtn = card.querySelector('.rate');
+    if (rateBtn) { rateBtn.querySelector('span').textContent = rateLabel(it); rateBtn.setAttribute('aria-pressed', String(!!it.myRating)); }
   }
 
   // Image assets: the whole picture, fitted to the card (no cropping) over a blurred copy of itself,
@@ -323,6 +331,8 @@
   }
 
   function applyMedia(it, m) {
+    if (m.qaEnabled !== undefined) it.qaEnabled = m.qaEnabled;
+    if (typeof m.questions === 'number') it.questions = m.questions;
     if (m.myRating !== undefined) it.myRating = m.myRating || 0;
     if (m.canRate !== undefined) it.canRate = m.canRate;
     if (typeof m.comments === 'number') it.engagement.comments = m.comments;
@@ -457,27 +467,83 @@
   }
 
   let sheetItem = null;
+  let sheetMode = 'comments';   // 'comments' or 'qa'
+  let sheetList = [];
+  let qaList = [];
+  const qaFor = (it) => it.kind === 'course' || (it.kind === 'asset' && it.qaEnabled !== false);
+  const commentsFor = (it) => it.kind !== 'course';
+
   function renderComments(list) {
     clist.innerHTML = list.length
       ? list.map((c) => `<li data-id="${c.id}"><span class="who">${esc(c.username)}</span><span class="when">${fmtWhen(c.createdAt)}</span>${c.mine ? '<button type="button" class="del">Delete</button>' : ''}<div>${esc(c.body)}</div></li>`).join('')
       : '<li class="empty">No comments yet. Start the conversation.</li>';
     $('sheetTitle').textContent = `Comments (${list.length})`;
   }
-  let sheetList = [];
-  async function openSheet(i) {
-    sheetItem = items[i];
-    sheetList = [];
+
+  // Docebo Q&A: questions, each expandable to its answers with an inline reply box.
+  function questionHtml(q) {
+    return `<li class="qa" data-qid="${q.id}">
+      <div class="qtext">${esc(q.text)}</div>
+      <div class="qmeta"><span class="who">${esc(q.author)}</span><span class="when">${fmtWhen(q.createdAt)}</span>${q.on ? `<span class="on">on ${esc(q.on)}</span>` : ''}</div>
+      ${q.best ? `<div class="best"><b>Best answer</b> ${esc(q.best)}</div>` : ''}
+      <button type="button" class="qtoggle" aria-expanded="false">${q.answers ? `${q.answers} answer${q.answers === 1 ? '' : 's'}` : 'Answer'}</button>
+      <div class="answers" hidden></div>
+    </li>`;
+  }
+  function renderQa() {
+    clist.innerHTML = qaList.length
+      ? qaList.map(questionHtml).join('')
+      : `<li class="empty">No questions yet. Ask the first one${sheetItem?.kind === 'course' ? ' about this course' : ''}.</li>`;
+    $('sheetTitle').textContent = `Q&A (${qaList.length})`;
+  }
+  function answersHtml(list, q) {
+    return `${list.map((a) => `<div class="ans${a.best ? ' isbest' : ''}"><span class="who">${esc(a.author)}</span><span class="when">${fmtWhen(a.createdAt)}</span>${a.best ? '<span class="on">Best answer</span>' : ''}<div>${esc(a.text)}</div></div>`).join('')}
+      ${q.canReply ? `<form class="aform"><input maxlength="2000" placeholder="Write an answer" aria-label="Your answer" autocomplete="off"><button type="submit">Answer</button></form>` : ''}`;
+  }
+
+  async function loadSheet() {
+    const it = sheetItem;
     $('sheetSrc').textContent = '';
+    if (sheetMode === 'qa') {
+      clist.innerHTML = '<li class="empty">Loading questions</li>';
+      $('cinput').placeholder = 'Ask a question';
+      $('cinput').setAttribute('aria-label', 'Your question');
+      try {
+        qaList = (await api(`/api/items/${encodeURIComponent(it.key)}/questions`)).questions;
+        if (it !== sheetItem || sheetMode !== 'qa') return;
+        $('sheetSrc').textContent = 'Docebo Q&A';
+        renderQa();
+      } catch (err) { clist.innerHTML = `<li class="empty">${esc(err.message)}</li>`; }
+      return;
+    }
+    $('cinput').placeholder = 'Add a comment';
+    $('cinput').setAttribute('aria-label', 'Comment');
+    sheetList = [];
     renderComments(sheetList);
-    openPanel(sheet);
-    $('cinput').focus({ preventScroll: true });
     try {
-      const r = await api(`/api/items/${encodeURIComponent(sheetItem.key)}/comments`);
+      const r = await api(`/api/items/${encodeURIComponent(it.key)}/comments`);
+      if (it !== sheetItem || sheetMode !== 'comments') return;
       sheetList = r.comments;
       $('sheetSrc').textContent = r.source === 'docebo' ? 'Synced with Docebo' : '';
       renderComments(sheetList);
     } catch (err) { toast(err.message); }
   }
+  function setSheetMode(mode) {
+    sheetMode = mode;
+    document.querySelectorAll('#sheetTabs .stab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
+    loadSheet();
+  }
+  async function openSheet(i) {
+    sheetItem = items[i];
+    const both = commentsFor(sheetItem) && qaFor(sheetItem);
+    $('sheetTabs').hidden = !both;
+    sheetMode = commentsFor(sheetItem) ? 'comments' : 'qa';
+    document.querySelectorAll('#sheetTabs .stab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.mode === sheetMode)));
+    openPanel(sheet);
+    $('cinput').focus({ preventScroll: true });
+    loadSheet();
+  }
+  document.querySelectorAll('#sheetTabs .stab').forEach((b) => b.addEventListener('click', () => setSheetMode(b.dataset.mode)));
   function closeSheet() {
     sheet.classList.remove('open');
     sheet.setAttribute('aria-hidden', 'true');
@@ -485,8 +551,13 @@
   }
   function updateCommentCount() {
     const i = items.indexOf(sheetItem);
-    sheetItem.engagement.comments = sheetList.length;
-    if (i >= 0) cards[i].querySelector('.com span').textContent = sheetList.length;
+    const n = sheetMode === 'qa' ? qaList.length : sheetList.length;
+    if (sheetMode === 'qa') sheetItem.questions = n;
+    // The rail shows questions for courses and comments for everything else.
+    if ((sheetItem.kind === 'course') === (sheetMode === 'qa')) {
+      sheetItem.engagement.comments = n;
+      if (i >= 0) cards[i].querySelector('.com span').textContent = n;
+    }
   }
 
   // ---------- rate (Docebo rating) ----------
@@ -817,6 +888,25 @@
   $('closeSheet').addEventListener('click', closeSheet);
   sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
   clist.addEventListener('click', async (e) => {
+    const tog = e.target.closest('.qtoggle');
+    if (tog) {
+      const li = tog.closest('li.qa');
+      const box = li.querySelector('.answers');
+      const open = box.hidden;
+      box.hidden = !open;
+      tog.setAttribute('aria-expanded', String(open));
+      if (open && !box.dataset.loaded) {
+        const q = qaList.find((x) => String(x.id) === li.dataset.qid);
+        box.innerHTML = '<div class="ans muted">Loading answers</div>';
+        try {
+          const { answers } = await api(`/api/questions/${encodeURIComponent(li.dataset.qid)}/answers`);
+          box.innerHTML = answersHtml(answers, q);
+          box.dataset.loaded = '1';
+        } catch (err) { box.innerHTML = `<div class="ans muted">${esc(err.message)}</div>`; }
+      }
+      box.querySelector('.aform input')?.focus({ preventScroll: true });
+      return;
+    }
     const del = e.target.closest('.del');
     if (!del) return;
     const id = del.closest('li').dataset.id;
@@ -827,11 +917,42 @@
       updateCommentCount();
     } catch (err) { toast(err.message); }
   });
+  clist.addEventListener('submit', async (e) => {
+    const form = e.target.closest('.aform');
+    if (!form) return;
+    e.preventDefault();
+    const input = form.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    const li = form.closest('li.qa');
+    const q = qaList.find((x) => String(x.id) === li.dataset.qid);
+    form.querySelector('button').disabled = true;
+    try {
+      const { answer } = await api(`/api/questions/${encodeURIComponent(li.dataset.qid)}/answers`, { method: 'POST', body: JSON.stringify({ text }) });
+      form.insertAdjacentHTML('beforebegin', `<div class="ans"><span class="who">${esc(answer.author)}</span><span class="when">${fmtWhen(answer.createdAt)}</span><div>${esc(answer.text)}</div></div>`);
+      input.value = '';
+      if (q) { q.answers += 1; li.querySelector('.qtoggle').textContent = `${q.answers} answer${q.answers === 1 ? '' : 's'}`; }
+      toast('Answer posted to Docebo.');
+    } catch (err) { toast(err.message); }
+    form.querySelector('button').disabled = false;
+  });
   $('cform').addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = $('cinput');
     const text = input.value.trim();
     if (!text || !sheetItem) return;
+    if (sheetMode === 'qa') {
+      try {
+        const { question } = await api(`/api/items/${encodeURIComponent(sheetItem.key)}/questions`, { method: 'POST', body: JSON.stringify({ text }) });
+        input.value = '';
+        qaList.unshift(question);
+        renderQa();
+        clist.scrollTop = 0;
+        updateCommentCount();
+        toast('Question posted to Docebo.');
+      } catch (err) { toast(err.message); }
+      return;
+    }
     try {
       const r = await api(`/api/items/${encodeURIComponent(sheetItem.key)}/comments`, { method: 'POST', body: JSON.stringify({ body: text }) });
       input.value = '';

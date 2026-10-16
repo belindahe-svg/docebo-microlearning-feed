@@ -103,8 +103,9 @@ Endpoints come from the instance's own API spec (`/share/v1/swagger`, `/learn/v1
 | Feed action | Assets | Courses | Learning plans |
 |---|---|---|---|
 | ~~Like ♥~~ | Removed from the card (Rate covers it); the likes table and API remain | | |
-| Rate ★ | `PUT /share/v1/assets/{id}/rating` | `POST /learn/v1/courses/{id}/rating` | n/a |
-| Comment | Docebo asset comments (`/share/v1/comments`) | App | App |
+| Rate ★ | `PUT /share/v1/assets/{id}/rating` | `POST /learn/v1/courses/{id}/rating`; average and count from `GET /learn/v1/courses/{id}` | n/a |
+| Comment | Docebo asset comments (`/share/v1/comments`) | Docebo Q&A (below) | App |
+| Q&A | Docebo Q&A tab when the asset's Q&A is on (`/share/v1/questions?id_asset=`) | `/share/v1/questions?id_course=` (questions sit on items inside the course) | n/a |
 | Save | Docebo **Add to playlist** picker: learner's playlists, toggle, create new | Same | App only |
 | Share | Invite to watch (`/share/v1/assets/{id}/invitations`) + copy link | Copy link | Copy link |
 | Watch | `PUT /share/v1/assets/{id}/track` on first play | n/a | n/a |
