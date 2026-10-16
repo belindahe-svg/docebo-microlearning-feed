@@ -185,3 +185,8 @@ html,body{overflow:hidden}
 /* Detail cards: move the big poster title up and darken the lower half so the text reads well */
 .card.rich .big{top:12%}
 .card.rich .shade{background:linear-gradient(180deg,rgba(0,0,0,.05) 25%,rgba(0,0,0,.85) 70%)}
+
+/* Landscape video: whole frame visible, centred a little above the text block */
+.card .vbg{display:none}
+.card.landscape .vbg{display:block;position:absolute;inset:-30px;background:#111 center/cover no-repeat;filter:blur(28px) brightness(.5);transform:scale(1.1)}
+.card.landscape video{object-fit:contain;object-position:center 40%;background:transparent}

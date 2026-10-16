@@ -144,7 +144,7 @@
     const [c1, c2] = PALETTE[i % PALETTE.length];
     const e = it.engagement;
     const visual = it.videoUrl
-      ? `<video preload="metadata" playsinline muted ${it.thumbnailUrl ? `poster="${esc(it.thumbnailUrl)}"` : ''} src="${esc(it.videoUrl)}"></video>
+      ? `${it.thumbnailUrl ? `<div class="vbg" style="background-image:url('${esc(it.thumbnailUrl)}')"></div>` : '<div class="vbg"></div>'}<video preload="metadata" playsinline muted ${it.thumbnailUrl ? `poster="${esc(it.thumbnailUrl)}"` : ''} src="${esc(it.videoUrl)}"></video>
          <div class="playstate">${ICON.play}</div>
          <button type="button" class="mute" aria-label="Unmute">Sound off</button>`
       : `<div class="art" style="background:linear-gradient(160deg,${c1},${c2})">${it.thumbnailUrl ? `<img alt="" src="${esc(it.thumbnailUrl)}">` : ''}</div>
@@ -195,6 +195,11 @@
   }
 
   function wireVideo(v, card, it) {
+    // Landscape videos in a portrait card: show the whole frame (letterboxed over a blurred copy of
+    // the thumbnail) instead of cropping the sides. Portrait videos keep filling the screen.
+    v.addEventListener('loadedmetadata', () => {
+      card.classList.toggle('landscape', v.videoWidth > v.videoHeight * 1.05);
+    });
     if (/\.m3u8(\?|$)/i.test(it.videoUrl) && !v.canPlayType('application/vnd.apple.mpegurl')) {
       v.removeAttribute('src');
       loadHls().then((Hls) => {
