@@ -816,7 +816,26 @@
   });
 
   // ---------- discovery mode ----------
+  // Go.Learn link test (discovery users only): one course opened four ways, to see which ones
+  // Go.Learn handles inside the app. Shown first so it does not wait for the endpoint checks.
+  function linkTestHtml() {
+    const host = 'atalentdemo2.docebosaas.com';
+    const d = encodeURIComponent(btoa(host));
+    const web = `https://${host}/learn/course/87/compliance-anti-corruption`;
+    const tests = [
+      ['A', `golearn://course/87?domain=${d}`, '_self', 'Go.Learn app link + domain (current)'],
+      ['B', `golearn://course/87`, '_self', 'Go.Learn app link, no domain'],
+      ['C', web, '_blank', 'Platform web link, new window'],
+      ['D', `https://${host}/learn/course/87`, '_self', 'Platform web link, same view'],
+    ];
+    return `<section class="discover linktest"><h1>Link test</h1>
+      <p>Tap each, note what opens (Go.Learn course screen, sign-in page, browser, nothing), then come back.</p>
+      ${tests.map(([k, href, t, label]) => `<a class="ltbtn" href="${esc(href)}" target="${t}">${k}. ${esc(label)}</a>`).join('')}
+    </section>`;
+  }
+
   async function showDiscovery() {
+    feedEl.innerHTML = linkTestHtml();
     statusEl.textContent = 'Checking Docebo endpoints';
     const d = await api('/api/discover');
     const lines = [
@@ -828,7 +847,7 @@
     ];
     const text = lines.join('\n');
     statusEl.hidden = true;
-    feedEl.innerHTML = `<section class="discover">
+    feedEl.innerHTML = `${linkTestHtml()}<section class="discover">
       <h1>Endpoint check</h1>
       <p>Read-only checks run with your own Docebo session. Copy the results and paste them to Claude.</p>
       <button type="button" id="copyDiscover">Copy results</button>
